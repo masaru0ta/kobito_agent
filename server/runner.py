@@ -57,8 +57,6 @@ class Runner:
             "--output-format", "stream-json",
             "--verbose",
             "--no-session-persistence",
-            "--tools", "",
-            "--strict-mcp-config",
             "--model", agent_info.config.model,
         ]
         if agent_info.system_prompt:
