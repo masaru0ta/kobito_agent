@@ -7,6 +7,7 @@ import json
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import AsyncGenerator, Literal
 
 from pydantic import BaseModel
@@ -62,13 +63,14 @@ class Runner:
                 cmd.extend(["--system-prompt", agent_info.system_prompt])
         return cmd
 
-    def _run_claude_sync(self, cmd: list[str], prompt: str) -> str:
+    def _run_claude_sync(self, cmd: list[str], prompt: str, cwd: Path | None = None) -> str:
         """claude -p を同期的に実行してstdoutを返す。プロンプトはstdinで渡す"""
         result = subprocess.run(
             cmd,
             input=prompt.encode("utf-8"),
             capture_output=True,
             timeout=300,
+            cwd=cwd,
         )
         if result.returncode != 0:
             stderr_text = result.stderr.decode("utf-8", errors="replace")
@@ -76,9 +78,10 @@ class Runner:
         return result.stdout.decode("utf-8", errors="replace")
 
     async def _run_claude(self, agent_info: AgentInfo, prompt: str, session_id: str | None = None) -> str:
-        """claude -p を非同期で実行し、stdoutを返す"""
+        """claude -p を非同期で実行し、stdoutを返す。cwdはエージェントのディレクトリ"""
         cmd = self._build_cmd(agent_info, session_id)
-        return await asyncio.to_thread(self._run_claude_sync, cmd, prompt)
+        cwd = Path("agents") / agent_info.agent_id
+        return await asyncio.to_thread(self._run_claude_sync, cmd, prompt, cwd)
 
     def _parse_result(self, stdout: str) -> RunResult:
         """stream-json出力からresultテキストとsession_idを抽出する"""
