@@ -1,7 +1,8 @@
 """runnerコンポーネントのテスト（spec_runner.md準拠）"""
 
 import json
-from unittest.mock import AsyncMock, patch, MagicMock
+import subprocess
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -56,26 +57,18 @@ def _make_stream_output(text="テスト応答です。"):
     return f"{init_line}\n{assistant_line}\n{result_line}\n"
 
 
-def _mock_subprocess(text="テスト応答です。"):
-    """asyncio.create_subprocess_exec のモックを返す"""
+def _mock_subprocess_run(text="テスト応答です。", returncode=0, stderr=b""):
+    """subprocess.run のモックを返す"""
     output = _make_stream_output(text)
 
-    async def mock_create(*args, **kwargs):
-        proc = AsyncMock()
-        proc.returncode = 0
-        proc.communicate = AsyncMock(return_value=(output.encode(), b""))
+    def mock_run(cmd, **kwargs):
+        result = MagicMock()
+        result.returncode = returncode
+        result.stdout = output.encode("utf-8")
+        result.stderr = stderr
+        return result
 
-        # stdout を行ごとにyieldする async iterator
-        async def line_iter():
-            for line in output.encode().split(b"\n"):
-                if line:
-                    yield line + b"\n"
-
-        proc.stdout = line_iter()
-        proc.wait = AsyncMock(return_value=0)
-        return proc
-
-    return mock_create
+    return mock_run
 
 
 # ============================================================
@@ -143,7 +136,7 @@ class TestRunNonStreaming:
         """runメソッドがLLMの応答テキストを返す"""
         messages = [Message(role="user", content="こんにちは")]
 
-        with patch("asyncio.create_subprocess_exec", side_effect=_mock_subprocess("こんにちは！")):
+        with patch("subprocess.run", side_effect=_mock_subprocess_run("こんにちは！")):
             result = await runner.run(agent_info, messages)
 
         assert result == "こんにちは！"
@@ -152,12 +145,12 @@ class TestRunNonStreaming:
         """指定されたモデルIDでclaude -pが呼ばれる"""
         messages = [Message(role="user", content="テスト")]
 
-        with patch("asyncio.create_subprocess_exec", side_effect=_mock_subprocess()) as mock:
+        with patch("subprocess.run", side_effect=_mock_subprocess_run()) as mock:
             await runner.run(agent_info, messages)
 
-        call_args = mock.call_args[0]
+        call_args = mock.call_args[0][0]
         assert "--model" in call_args
-        model_idx = list(call_args).index("--model")
+        model_idx = call_args.index("--model")
         assert call_args[model_idx + 1] == "claude-sonnet-4-20250514"
 
 
@@ -173,7 +166,7 @@ class TestRunStreaming:
         """run_streamメソッドがテキストチャンクをyieldする"""
         messages = [Message(role="user", content="こんにちは")]
 
-        with patch("asyncio.create_subprocess_exec", side_effect=_mock_subprocess("こんにちは")):
+        with patch("subprocess.run", side_effect=_mock_subprocess_run("こんにちは")):
             chunks = []
             async for chunk in runner.run_stream(agent_info, messages):
                 chunks.append(chunk)
@@ -185,7 +178,7 @@ class TestRunStreaming:
         """全チャンクを結合すると完全な応答テキストになる"""
         messages = [Message(role="user", content="テスト")]
 
-        with patch("asyncio.create_subprocess_exec", side_effect=_mock_subprocess("テスト応答です。")):
+        with patch("subprocess.run", side_effect=_mock_subprocess_run("テスト応答です。")):
             full = ""
             async for chunk in runner.run_stream(agent_info, messages):
                 full += chunk
@@ -210,12 +203,6 @@ class TestRunnerErrors:
         """claude -p がエラーを返した場合、例外が送出される"""
         messages = [Message(role="user", content="テスト")]
 
-        async def mock_fail(*args, **kwargs):
-            proc = AsyncMock()
-            proc.returncode = 1
-            proc.communicate = AsyncMock(return_value=(b"", b"Error: API key not found"))
-            return proc
-
-        with patch("asyncio.create_subprocess_exec", side_effect=mock_fail):
+        with patch("subprocess.run", side_effect=_mock_subprocess_run(returncode=1, stderr=b"Error: API key not found")):
             with pytest.raises(RuntimeError):
                 await runner.run(agent_info, messages)

@@ -5,9 +5,12 @@ uvicornのreload=Trueは子プロセスを生成する。
 Windows Job Objectを使い、親が死んだら子も自動終了するようにする。
 """
 
+import os
 import sys
 
 import uvicorn
+
+DEFAULT_PORT = 8300
 
 
 def _setup_job_object():
@@ -81,4 +84,5 @@ def _setup_job_object():
 
 if __name__ == "__main__":
     _job = _setup_job_object()
-    uvicorn.run("server.app:create_app", host="0.0.0.0", port=8000, reload=True, factory=True)
+    port = int(os.environ.get("KOBITO_PORT", DEFAULT_PORT))
+    uvicorn.run("server.app:create_app", host="0.0.0.0", port=port, reload=True, factory=True)

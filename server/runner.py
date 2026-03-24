@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-import sys
+import subprocess
 from typing import AsyncGenerator, Literal
 
 from pydantic import BaseModel
@@ -43,10 +43,10 @@ class Runner:
 
     @staticmethod
     def _find_claude() -> str:
-        """claudeコマンドのフルパスを返す。Windowsでは.cmdを解決する"""
+        """claudeコマンドのフルパスを返す"""
         path = shutil.which("claude")
         if path is None:
-            raise FileNotFoundError("claudeコマンドが見つかりません。Claude Code CLIをインストールしてください")
+            raise FileNotFoundError("claudeコマンドが見つかりません")
         return path
 
     def _build_cmd(self, agent_info: AgentInfo, prompt: str) -> list[str]:
@@ -63,23 +63,23 @@ class Runner:
         cmd.append(prompt)
         return cmd
 
+    def _run_claude_sync(self, cmd: list[str]) -> str:
+        """claude -p を同期的に実行してstdoutを返す"""
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=300,
+        )
+        if result.returncode != 0:
+            stderr_text = result.stderr.decode("utf-8", errors="replace")
+            raise RuntimeError(f"claude -p 失敗: {stderr_text}")
+        return result.stdout.decode("utf-8", errors="replace")
+
     async def _run_claude(self, agent_info: AgentInfo, messages: list[Message]) -> str:
-        """claude -p を非同期サブプロセスで実行し、stdoutを返す"""
+        """claude -p を非同期で実行し、stdoutを返す"""
         prompt = self._build_prompt(messages)
         cmd = self._build_cmd(agent_info, prompt)
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout_bytes, stderr_bytes = await proc.communicate()
-
-        if proc.returncode != 0:
-            stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-            raise RuntimeError(f"claude -p 失敗: {stderr_text}")
-
-        return stdout_bytes.decode("utf-8")
+        return await asyncio.to_thread(self._run_claude_sync, cmd)
 
     def _parse_result(self, stdout: str) -> str:
         """stream-json出力からresultテキストを抽出する"""
