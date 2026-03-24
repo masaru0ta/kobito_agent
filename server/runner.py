@@ -32,14 +32,15 @@ class Runner:
         return built
 
     def _build_prompt(self, messages: list[Message]) -> str:
-        """会話履歴を1つのプロンプト文字列に変換する"""
-        parts = []
+        """会話履歴をプロンプト文字列に変換する。最後のメッセージにのみ応答させる"""
+        if len(messages) == 1:
+            return messages[0].content
+
+        parts = ["以下は会話の履歴です。最後のメッセージにのみ応答してください。", ""]
         for msg in messages:
-            if msg.role == "user":
-                parts.append(f"ユーザー: {msg.content}")
-            else:
-                parts.append(f"アシスタント: {msg.content}")
-        return "\n\n".join(parts)
+            tag = "[user]" if msg.role == "user" else "[assistant]"
+            parts.append(f"{tag}: {msg.content}")
+        return "\n".join(parts)
 
     @staticmethod
     def _find_claude() -> str:
@@ -49,24 +50,26 @@ class Runner:
             raise FileNotFoundError("claudeコマンドが見つかりません")
         return path
 
-    def _build_cmd(self, agent_info: AgentInfo, prompt: str) -> list[str]:
-        """claude -p コマンドの引数リストを組み立てる"""
+    def _build_cmd(self, agent_info: AgentInfo) -> list[str]:
+        """claude -p コマンドの引数リストを組み立てる（プロンプトはstdinで渡す）"""
         cmd = [
             self._find_claude(), "-p",
             "--output-format", "stream-json",
             "--verbose",
             "--no-session-persistence",
+            "--tools", "",
+            "--strict-mcp-config",
             "--model", agent_info.config.model,
         ]
         if agent_info.system_prompt:
             cmd.extend(["--system-prompt", agent_info.system_prompt])
-        cmd.append(prompt)
         return cmd
 
-    def _run_claude_sync(self, cmd: list[str]) -> str:
-        """claude -p を同期的に実行してstdoutを返す"""
+    def _run_claude_sync(self, cmd: list[str], prompt: str) -> str:
+        """claude -p を同期的に実行してstdoutを返す。プロンプトはstdinで渡す"""
         result = subprocess.run(
             cmd,
+            input=prompt.encode("utf-8"),
             capture_output=True,
             timeout=300,
         )
@@ -78,8 +81,8 @@ class Runner:
     async def _run_claude(self, agent_info: AgentInfo, messages: list[Message]) -> str:
         """claude -p を非同期で実行し、stdoutを返す"""
         prompt = self._build_prompt(messages)
-        cmd = self._build_cmd(agent_info, prompt)
-        return await asyncio.to_thread(self._run_claude_sync, cmd)
+        cmd = self._build_cmd(agent_info)
+        return await asyncio.to_thread(self._run_claude_sync, cmd, prompt)
 
     def _parse_result(self, stdout: str) -> str:
         """stream-json出力からresultテキストを抽出する"""
@@ -108,7 +111,6 @@ class Runner:
         stdout = await self._run_claude(agent_info, messages)
         result = self._parse_result(stdout)
 
-        # 文単位で分割してyield（疑似ストリーミング）
         chunk_size = 50
         for i in range(0, len(result), chunk_size):
             yield result[i:i + chunk_size]

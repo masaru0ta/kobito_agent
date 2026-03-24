@@ -123,6 +123,25 @@ class TestPromptAssembly:
         assert built[-1]["role"] == "user"
         assert built[-1]["content"] == "最新のメッセージ"
 
+    def test_single_message_returns_content_directly(self, runner):
+        """メッセージが1つの場合、contentをそのまま返す"""
+        messages = [Message(role="user", content="こんにちは")]
+        prompt = runner._build_prompt(messages)
+        assert prompt == "こんにちは"
+
+    def test_multi_turn_prompt_has_instruction(self, runner):
+        """複数ターンの場合、応答指示が含まれる"""
+        messages = [
+            Message(role="user", content="こんにちは"),
+            Message(role="assistant", content="やあ"),
+            Message(role="user", content="元気？"),
+        ]
+        prompt = runner._build_prompt(messages)
+        assert "最後のメッセージにのみ応答" in prompt
+        assert "[user]: こんにちは" in prompt
+        assert "[assistant]: やあ" in prompt
+        assert "[user]: 元気？" in prompt
+
 
 # ============================================================
 # LLM呼び出し（非ストリーミング）
@@ -152,6 +171,17 @@ class TestRunNonStreaming:
         assert "--model" in call_args
         model_idx = call_args.index("--model")
         assert call_args[model_idx + 1] == "claude-sonnet-4-20250514"
+
+    async def test_prompt_passed_via_stdin(self, runner, agent_info):
+        """プロンプトがstdin経由で渡される"""
+        messages = [Message(role="user", content="テスト")]
+
+        with patch("subprocess.run", side_effect=_mock_subprocess_run()) as mock:
+            await runner.run(agent_info, messages)
+
+        kwargs = mock.call_args[1]
+        assert "input" in kwargs
+        assert kwargs["input"] == "テスト".encode("utf-8")
 
 
 # ============================================================
