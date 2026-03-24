@@ -11,8 +11,12 @@ Thumbs.db
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 venv/
+
+# Playwright MCP
+.playwright-mcp/
 
 # clasp
 .clasp.json
