@@ -1,6 +1,6 @@
-# ＜ここにプロジェクト名を書く＞
+# kobito_agent
 
-＜ここにプロジェクト概要を書く＞
+
 
 ## YOU MUST: 
 - 回答は日本語で行うこと
@@ -33,13 +33,13 @@
 
 ### GitHub
 
-- **リポジトリURL**: ＜ここに Github の URL を書く＞
+- **リポジトリURL**: https://github.com/masaru0ta/kobito_agent
 
 
 ### GAS (Google App Script)
 
-- **プロジェクト名**: ＜ここにプロジェクト名を書く＞
-- **スクリプトURL**: ＜ここにGASプロジェクトのURLを書く＞
+- **プロジェクト名**: kobito_agent
+- **スクリプトURL**: https://script.google.com/d/1Og1NJwmuFE-ALLkpHJQeJ_kCsPfVDQVO4sQk8SIsKAeCPhZzwGgMdhBd/edit
 - **デプロイURL**:
 
 GASコードは `src/gas/script.js` で管理。
