@@ -34,18 +34,21 @@ class MockRunner:
             built.append({"role": msg.role, "content": msg.content})
         return built
 
-    async def run(self, agent_info, messages):
+    async def run(self, agent_info, messages, session_id=None):
         if not messages:
             raise ValueError("メッセージリストが空です")
-        return MOCK_RESPONSE
+        from server.runner import RunResult
+        return RunResult(text=MOCK_RESPONSE, session_id="mock-session-id")
 
-    async def run_stream(self, agent_info, messages):
+    async def run_stream(self, agent_info, messages, session_id=None):
         if not messages:
             raise ValueError("メッセージリストが空です")
+        from server.runner import RunResult
 
         chunks = [MOCK_RESPONSE[i:i+10] for i in range(0, len(MOCK_RESPONSE), 10)]
         for chunk in chunks:
             yield chunk
+        yield RunResult(text=MOCK_RESPONSE, session_id="mock-session-id")
 
 
 def _setup_test_agents():

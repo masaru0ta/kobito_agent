@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
+from server.runner import RunResult
+
 
 @pytest.fixture
 def agents_dir(tmp_path):
@@ -53,6 +55,7 @@ def sample_conversation(adam_dir):
         "agent_id": "adam",
         "created_at": "2026-03-24T10:00:00Z",
         "updated_at": "2026-03-24T10:05:00Z",
+        "session_id": "mock-session-id",
         "messages": [
             {
                 "role": "user",
@@ -78,6 +81,7 @@ def mock_runner():
     class MockRunner:
         def __init__(self):
             self._response_chunks = ["テスト", "応答", "です。"]
+            self._session_id = "mock-session-id"
 
         def set_chunks(self, chunks):
             self._response_chunks = chunks
@@ -90,15 +94,22 @@ def mock_runner():
                 built.append({"role": msg.role, "content": msg.content})
             return built
 
-        async def run(self, agent_info, messages):
+        async def run(self, agent_info, messages, session_id=None):
             if not messages:
                 raise ValueError("メッセージリストが空です")
-            return "".join(self._response_chunks)
+            return RunResult(
+                text="".join(self._response_chunks),
+                session_id=self._session_id,
+            )
 
-        async def run_stream(self, agent_info, messages):
+        async def run_stream(self, agent_info, messages, session_id=None):
             if not messages:
                 raise ValueError("メッセージリストが空です")
             for chunk in self._response_chunks:
                 yield chunk
+            yield RunResult(
+                text="".join(self._response_chunks),
+                session_id=self._session_id,
+            )
 
     return MockRunner()

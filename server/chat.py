@@ -11,7 +11,7 @@ from typing import AsyncGenerator, Literal
 from pydantic import BaseModel
 
 from server.config import ConfigManager
-from server.runner import Message, Runner
+from server.runner import Message, Runner, RunResult
 
 
 class ChatEvent(BaseModel):
@@ -93,23 +93,32 @@ class ChatManager:
                 "agent_id": agent_id,
                 "created_at": now,
                 "updated_at": now,
+                "session_id": None,
                 "messages": [],
             }
             yield ChatEvent(type="conversation_id", data=conversation_id)
         else:
             conv_data = self._load_conv(agent_id, conversation_id)
 
-        # 既存メッセージからRunner用Messageリストを構築
-        history = [Message(role=m["role"], content=m["content"]) for m in conv_data["messages"]]
-        history.append(Message(role="user", content=message))
+        # Claude Codeのセッションを継続（session_idがあれば--resume）
+        session_id = conv_data.get("session_id")
+        messages = [Message(role="user", content=message)]
 
         # ストリーミング応答
         full_response = ""
-        async for chunk in self._runner.run_stream(agent_info, history):
-            full_response += chunk
-            yield ChatEvent(type="chunk", data=chunk)
+        run_result = None
+        async for item in self._runner.run_stream(agent_info, messages, session_id):
+            if isinstance(item, RunResult):
+                run_result = item
+            else:
+                full_response += item
+                yield ChatEvent(type="chunk", data=item)
 
         yield ChatEvent(type="done", data=full_response)
+
+        # session_idを保存（初回は新規取得、継続時は更新）
+        if run_result and run_result.session_id:
+            conv_data["session_id"] = run_result.session_id
 
         # 会話履歴に保存
         conv_data["messages"].append({"role": "user", "content": message, "timestamp": now})

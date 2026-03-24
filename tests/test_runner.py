@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from server.config import AgentConfig, AgentInfo
-from server.runner import Message, Runner
+from server.runner import Message, Runner, RunResult
 
 
 @pytest.fixture
@@ -43,9 +43,12 @@ def runner():
     return Runner()
 
 
-def _make_stream_output(text="テスト応答です。"):
+TEST_SESSION_ID = "test-session-1234"
+
+
+def _make_stream_output(text="テスト応答です。", session_id=TEST_SESSION_ID):
     """claude -p --output-format stream-json の出力を模倣"""
-    init_line = json.dumps({"type": "system", "subtype": "init"})
+    init_line = json.dumps({"type": "system", "subtype": "init", "session_id": session_id})
     assistant_line = json.dumps({
         "type": "assistant",
         "message": {
@@ -53,13 +56,16 @@ def _make_stream_output(text="テスト応答です。"):
             "content": [{"type": "text", "text": text}],
         },
     })
-    result_line = json.dumps({"type": "result", "subtype": "success", "result": text})
+    result_line = json.dumps({
+        "type": "result", "subtype": "success",
+        "result": text, "session_id": session_id,
+    })
     return f"{init_line}\n{assistant_line}\n{result_line}\n"
 
 
-def _mock_subprocess_run(text="テスト応答です。", returncode=0, stderr=b""):
+def _mock_subprocess_run(text="テスト応答です。", session_id=TEST_SESSION_ID, returncode=0, stderr=b""):
     """subprocess.run のモックを返す"""
-    output = _make_stream_output(text)
+    output = _make_stream_output(text, session_id)
 
     def mock_run(cmd, **kwargs):
         result = MagicMock()
@@ -123,25 +129,6 @@ class TestPromptAssembly:
         assert built[-1]["role"] == "user"
         assert built[-1]["content"] == "最新のメッセージ"
 
-    def test_single_message_returns_content_directly(self, runner):
-        """メッセージが1つの場合、contentをそのまま返す"""
-        messages = [Message(role="user", content="こんにちは")]
-        prompt = runner._build_prompt(messages)
-        assert prompt == "こんにちは"
-
-    def test_multi_turn_prompt_has_instruction(self, runner):
-        """複数ターンの場合、応答指示が含まれる"""
-        messages = [
-            Message(role="user", content="こんにちは"),
-            Message(role="assistant", content="やあ"),
-            Message(role="user", content="元気？"),
-        ]
-        prompt = runner._build_prompt(messages)
-        assert "最後のメッセージにのみ応答" in prompt
-        assert "[user]: こんにちは" in prompt
-        assert "[assistant]: やあ" in prompt
-        assert "[user]: 元気？" in prompt
-
 
 # ============================================================
 # LLM呼び出し（非ストリーミング）
@@ -151,14 +138,16 @@ class TestPromptAssembly:
 class TestRunNonStreaming:
     """非ストリーミングLLM呼び出しのテスト"""
 
-    async def test_run_returns_response(self, runner, agent_info):
-        """runメソッドがLLMの応答テキストを返す"""
+    async def test_run_returns_run_result(self, runner, agent_info):
+        """runメソッドがRunResultを返す"""
         messages = [Message(role="user", content="こんにちは")]
 
         with patch("subprocess.run", side_effect=_mock_subprocess_run("こんにちは！")):
             result = await runner.run(agent_info, messages)
 
-        assert result == "こんにちは！"
+        assert isinstance(result, RunResult)
+        assert result.text == "こんにちは！"
+        assert result.session_id == TEST_SESSION_ID
 
     async def test_run_uses_correct_model(self, runner, agent_info):
         """指定されたモデルIDでclaude -pが呼ばれる"""
@@ -183,6 +172,29 @@ class TestRunNonStreaming:
         assert "input" in kwargs
         assert kwargs["input"] == "テスト".encode("utf-8")
 
+    async def test_new_session_has_system_prompt(self, runner, agent_info):
+        """新規セッション（session_idなし）ではsystem-promptが渡される"""
+        messages = [Message(role="user", content="テスト")]
+
+        with patch("subprocess.run", side_effect=_mock_subprocess_run()) as mock:
+            await runner.run(agent_info, messages)
+
+        call_args = mock.call_args[0][0]
+        assert "--system-prompt" in call_args
+
+    async def test_resume_session_has_resume_flag(self, runner, agent_info):
+        """継続セッション（session_idあり）では--resumeが渡される"""
+        messages = [Message(role="user", content="テスト")]
+
+        with patch("subprocess.run", side_effect=_mock_subprocess_run()) as mock:
+            await runner.run(agent_info, messages, session_id="existing-session")
+
+        call_args = mock.call_args[0][0]
+        assert "--resume" in call_args
+        resume_idx = call_args.index("--resume")
+        assert call_args[resume_idx + 1] == "existing-session"
+        assert "--system-prompt" not in call_args
+
 
 # ============================================================
 # LLM呼び出し（ストリーミング）
@@ -192,15 +204,21 @@ class TestRunNonStreaming:
 class TestRunStreaming:
     """ストリーミングLLM呼び出しのテスト"""
 
-    async def test_run_stream_yields_chunks(self, runner, agent_info):
-        """run_streamメソッドがテキストチャンクをyieldする"""
+    async def test_run_stream_yields_chunks_and_result(self, runner, agent_info):
+        """run_streamがテキストチャンクの後にRunResultをyieldする"""
         messages = [Message(role="user", content="こんにちは")]
 
         with patch("subprocess.run", side_effect=_mock_subprocess_run("こんにちは")):
-            chunks = []
-            async for chunk in runner.run_stream(agent_info, messages):
-                chunks.append(chunk)
+            items = []
+            async for item in runner.run_stream(agent_info, messages):
+                items.append(item)
 
+        # 最後の要素はRunResult
+        assert isinstance(items[-1], RunResult)
+        assert items[-1].session_id == TEST_SESSION_ID
+
+        # それ以外はテキストチャンク
+        chunks = [i for i in items if isinstance(i, str)]
         assert len(chunks) > 0
         assert "".join(chunks) == "こんにちは"
 
@@ -210,8 +228,9 @@ class TestRunStreaming:
 
         with patch("subprocess.run", side_effect=_mock_subprocess_run("テスト応答です。")):
             full = ""
-            async for chunk in runner.run_stream(agent_info, messages):
-                full += chunk
+            async for item in runner.run_stream(agent_info, messages):
+                if isinstance(item, str):
+                    full += item
 
         assert full == "テスト応答です。"
 

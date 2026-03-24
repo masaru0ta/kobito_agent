@@ -94,6 +94,34 @@ class TestSendMessage:
         assert data["messages"][1]["role"] == "assistant"
         assert data["messages"][1]["content"] == "テスト応答です。"
 
+    async def test_session_id_saved_on_new_conversation(self, chat_manager, agents_dir):
+        """新規会話後、session_idが会話データに保存される"""
+        conv_id = None
+        async for event in chat_manager.send_message("adam", None, "テスト"):
+            if event.type == "conversation_id":
+                conv_id = event.data
+
+        filepath = agents_dir / "adam" / "chat_history" / f"{conv_id}.json"
+        data = json.loads(filepath.read_text(encoding="utf-8"))
+        assert data["session_id"] == "mock-session-id"
+
+    async def test_session_id_passed_on_continue(self, chat_manager, sample_conversation, mock_runner):
+        """既存会話の継続時、session_idがrunnerに渡される"""
+        called_session_ids = []
+        original_run_stream = mock_runner.run_stream
+
+        async def tracking_run_stream(agent_info, messages, session_id=None):
+            called_session_ids.append(session_id)
+            async for item in original_run_stream(agent_info, messages, session_id):
+                yield item
+
+        mock_runner.run_stream = tracking_run_stream
+
+        async for _ in chat_manager.send_message("adam", sample_conversation, "続き"):
+            pass
+
+        assert called_session_ids[0] == "mock-session-id"
+
 
 # ============================================================
 # 会話履歴
