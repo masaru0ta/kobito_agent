@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kobito_agent</title>
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+<!-- サイドバー -->
+<aside class="sidebar">
+  <div class="sidebar-logo">kobito_agent</div>
+
+  <div class="sidebar-section-title">エージェント</div>
+  <ul class="agent-list" id="agent-list"></ul>
+
+  <div class="sidebar-section-title">会話履歴</div>
+  <ul class="conversation-list" id="conversation-list"></ul>
+</aside>
+
+<!-- メインエリア -->
+<main class="main">
+  <div class="chat-header">
+    <div>
+      <div class="chat-header-name" id="header-name"></div>
+      <div class="chat-header-model" id="header-model"></div>
+      <div class="chat-header-session" id="header-session"></div>
+    </div>
+    <div class="header-actions">
+      <button class="btn" id="btn-back-chat" style="display: none;">チャットに戻る</button>
+      <button class="btn btn-settings" id="btn-settings" style="display: none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+        設定
+      </button>
+      <button class="btn btn-think" id="btn-think" style="display: none;">思考実行</button>
+      <button class="btn" id="btn-launch-cli">Claude起動</button>
+      <button class="btn" id="btn-new-conversation">新規会話</button>
+    </div>
+  </div>
+
+  <!-- タブナビゲーション -->
+  <div class="view-tabs" id="view-tabs">
+    <button class="view-tab active" data-view="chat">チャット</button>
+    <button class="view-tab" data-view="logs">ログ</button>
+    <button class="view-tab" data-view="outputs">成果物</button>
+  </div>
+
+  <!-- チャット画面 -->
+  <div class="chat-view" id="chat-view">
+    <div class="chat-messages" id="chat-messages"></div>
+
+    <div class="chat-input-area">
+      <div class="chat-input-wrapper">
+        <textarea class="chat-input" id="chat-input" placeholder="メッセージを入力..." rows="1" disabled></textarea>
+        <button class="btn-send" id="btn-send" disabled>送信</button>
+      </div>
+      <div class="input-hint">Enter で送信 / Shift+Enter で改行</div>
+    </div>
+  </div>
+
+  <!-- ログ画面 -->
+  <div class="logs-view hidden" id="logs-view">
+    <div class="logs-container">
+      <div class="mission-task-section" id="mission-task-section">
+        <div class="mission-section">
+          <div class="section-label">ミッション</div>
+          <div class="section-content" id="mission-content">未設定</div>
+        </div>
+        <div class="task-section">
+          <div class="section-label">タスク</div>
+          <div class="section-content" id="task-content">未設定</div>
+        </div>
+      </div>
+      <div class="logs-list" id="logs-list"></div>
+      <div class="log-detail hidden" id="log-detail">
+        <button class="btn btn-back-logs" id="btn-back-logs">一覧に戻る</button>
+        <div class="log-detail-content" id="log-detail-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 成果物画面 -->
+  <div class="outputs-view hidden" id="outputs-view">
+    <div class="outputs-container">
+      <div class="outputs-list" id="outputs-list"></div>
+      <div class="output-detail hidden" id="output-detail">
+        <button class="btn btn-back-outputs" id="btn-back-outputs">一覧に戻る</button>
+        <div class="output-detail-content" id="output-detail-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 設定画面 -->
+  <div class="settings-view hidden" id="settings-view">
+    <div class="settings-container">
+      <div class="settings-section">
+        <div class="settings-section-title">基本設定</div>
+        <div class="form-group">
+          <label class="form-label" for="setting-name">名前</label>
+          <input class="form-input" id="setting-name" type="text" placeholder="エージェント名">
+          <div class="form-error" id="error-name">名前は必須です</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="setting-model">モデル</label>
+          <input class="form-input" id="setting-model" type="text" placeholder="モデルID">
+          <div class="form-hint">例: claude-sonnet-4-20250514, claude-haiku-4-5-20251001</div>
+          <div class="form-error" id="error-model">モデルは必須です</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="setting-description">説明</label>
+          <input class="form-input" id="setting-description" type="text" placeholder="一行説明（任意）">
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">システムプロンプト（CLAUDE.md）</div>
+        <div class="form-group">
+          <textarea class="form-textarea" id="setting-system-prompt" placeholder="エージェントの人格を定義するプロンプト..."></textarea>
+          <div class="form-hint">Markdown形式で記述できます</div>
+        </div>
+      </div>
+      <div class="settings-actions">
+        <span class="save-feedback" id="save-feedback">保存しました</span>
+        <button class="btn-reset" id="btn-reset">リセット</button>
+        <button class="btn-save" id="btn-save">保存</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="/js/api.js"></script>
+<script src="/js/chat.js"></script>
+<script src="/js/settings.js"></script>
+<script src="/js/think.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

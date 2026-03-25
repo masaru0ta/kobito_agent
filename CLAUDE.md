@@ -22,7 +22,9 @@
 ```
 kobito_agent/
   team.md                # エージェント一覧と共通ルール
-  agents/
+  CLAUDE.md              # プロジェクト全体の説明
+  start.bat              # サーバー起動（ダブルクリック）
+  agent/
     {agent_name}/
       CLAUDE.md            # 各エージェントのシステムプロンプト
       config.yaml          # モデル、名前、トリガー設定
@@ -33,11 +35,16 @@ kobito_agent/
         index.md           # 成果物の目次
       chat_history/        # 会話履歴
       log/                 # 思考・実行ログ
-  server/
-    app.py               # Webサーバー（エントリーポイント）
-    static/              # HTML/CSS/JS
-    api/                 # REST API
-  docs/                  # 仕様書
+  project/
+    agent_manager/         # エージェント管理システム
+      server/
+        app.py             # Webサーバー（エントリーポイント）
+        static/            # HTML/CSS/JS
+      docs/                # 仕様書
+      tests/               # テスト
+      scripts/             # フックスクリプト
+      run.py               # サーバー起動スクリプト
+    (将来: 他のプロジェクトもここに配置)
 ```
 
 ### コンポーネントと仕様書
@@ -56,8 +63,8 @@ kobito_agent/
 | # | フェーズ | やること | コンポーネント | 状態 |
 |---|---------|---------|--------------|------|
 | 1 | 基盤 | configを読み、Web UIからエージェントとチャットできる | config, runner, web, chat | 完了 |
-| 2 | 設定管理 | Web UIからconfig.yaml・CLAUDE.mdを編集できる | config, web | 未着手 |
-| 3 | 自律作業 | mission/taskを読み、自律的に作業を実行し、成果物を出力する | runner, web | 未着手 |
+| 2 | 設定管理 | Web UIからconfig.yaml・CLAUDE.mdを編集できる | config, web | 完了 |
+| 3 | 自律作業 | mission/taskを読み、自律的に作業を実行し、成果物を出力する | runner, web | 完了 |
 | 4 | 定期トリガー | 定期トリガーで自律思考サイクルを回す | trigger(cron) | 未着手 |
 | 5 | エージェント間通信 | エージェント同士がトリガーで会話する | trigger | 未着手 |
 | 6 | 記憶 | Mem0による記憶の保存・想起 | memory | 未着手 |
@@ -74,7 +81,7 @@ kobito_agent/
 
 ## 記憶（Mem0）
 
-- 各エージェント専用のストレージ。`agents/{name}/memory/` に格納
+- 各エージェント専用のストレージ。`agent/{name}/memory/` に格納
 - 定期的に検索と記録が行われる
 - 何をどう記憶するか細かく規定しない。エージェント自身の判断に委ねる
 - 思考サイクルの冒頭で関連記憶をベクトル検索で自動想起
@@ -88,7 +95,7 @@ kobito_agent/
 
 ## 成果物
 
-- .mdファイルで `agents/{name}/output/` に出力
+- .mdファイルで `agent/{name}/output/` に出力
 - **index.md** を必ず持つ。全ファイルへのリンクと一行説明
 - ファイルを作ったらindex.mdを更新する
 - 既存のファイルがあれば新規作成より更新を優先する
@@ -185,7 +192,7 @@ kobito_agent/
 
 ## 注意事項
 
-- **プロジェクト共有のファイル（仕様書 `docs/`、テスト `tests/`、サーバー `server/` 等）はプロジェクトルートから探すこと**。エージェントディレクトリ（`agents/{name}/`）をcwdにしている場合でも、共有ファイルの検索パスはプロジェクトルート（`D:\AI\code\kobito_agent`）を指定する
+- **プロジェクト共有のファイル（仕様書 `docs/`、テスト `tests/`、サーバー `server/` 等）は `project/agent_manager/` 配下にある**。エージェントディレクトリ（`agent/{name}/`）をcwdにしている場合でも、共有ファイルの検索パスは `D:\AI\code\kobito_agent\project\agent_manager` を指定する
 
 ## YOU MUST:
 - 回答は日本語で行うこと

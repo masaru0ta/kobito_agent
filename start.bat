@@ -15,7 +15,7 @@ if not errorlevel 1 (
 
 REM Start server in background
 echo Starting server on port %PORT%...
-start /b "" python "%~dp0run.py" >nul 2>&1
+start "kobito_agent server" python "%~dp0project\agent_manager\run.py"
 
 REM Wait for server to be ready (max 30 seconds)
 set count=0

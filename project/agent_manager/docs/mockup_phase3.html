@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kobito_agent - Phase 3 モックアップ</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --left-width: 20vw;
+    --mid-width: 40vw;
+    --bg: #0a0a0f;
+    --pane-bg: #050508;
+    --pane-border: #1a1a25;
+    --header-bg: #0e0e15;
+    --user-msg-bg: #2563eb;
+    --user-msg-text: #ffffff;
+    --agent-msg-bg: #16161f;
+    --agent-msg-text: #b0b8cd;
+    --input-bg: #0e0e15;
+    --input-border: #2a2a3a;
+    --accent: #6ea1f7;
+    --muted: #505868;
+    --section-title: #7a829a;
+    --think-accent: #6ee7b7;
+    --think-bg: #1a3a2a;
+    --think-border: #2a5a3a;
+    --error: #ef4444;
+    --item-hover: #111118;
+    --item-active: #1a1a25;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif;
+    height: 100vh;
+    display: flex;
+    background: var(--bg);
+    color: #b0b8cd;
+  }
+
+  /* ==============================
+     左ペイン（エージェント一覧）
+     ============================== */
+  .pane-left {
+    width: var(--left-width);
+    min-width: var(--left-width);
+    background: var(--pane-bg);
+    border-right: 1px solid var(--pane-border);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  .pane-left-logo {
+    padding: 20px 16px 12px;
+    font-size: 16px;
+    font-weight: 700;
+    color: #ffffff;
+    border-bottom: 1px solid var(--pane-border);
+  }
+  .pane-left-section {
+    padding: 16px 16px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--section-title);
+  }
+  .agent-list { list-style: none; }
+  .agent-item {
+    padding: 10px 16px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background 0.15s;
+  }
+  .agent-item:hover { background: var(--item-hover); }
+  .agent-item.active { background: var(--item-active); border-left-color: var(--accent); }
+  .agent-item-name { font-size: 14px; font-weight: 500; }
+  .agent-item-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* ==============================
+     中ペイン（タブ + リスト/内容）
+     ============================== */
+  .pane-mid {
+    width: var(--mid-width);
+    min-width: var(--mid-width);
+    background: var(--pane-bg);
+    border-right: 1px solid var(--pane-border);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  /* タブ */
+  .mid-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--pane-border);
+    background: var(--header-bg);
+  }
+  .mid-tab {
+    flex: 1;
+    padding: 10px 4px;
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    text-align: center;
+    transition: color 0.15s;
+  }
+  .mid-tab:hover { color: #b0b8cd; }
+  .mid-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* 中ペインのコンテンツ */
+  .mid-content {
+    flex: 1;
+    overflow-y: auto;
+    display: none;
+  }
+  .mid-content.active { display: flex; flex-direction: column; }
+
+  /* 中ペイン：リスト型 */
+  .mid-list-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--pane-border);
+  }
+  .btn-action {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    background: var(--item-active);
+    color: #b0b8cd;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .btn-action:hover { background: #2a2a3a; }
+  .btn-think-action {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--think-border);
+    border-radius: 6px;
+    background: var(--think-bg);
+    color: var(--think-accent);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-think-action:hover { background: #2a4a3a; }
+
+  .mid-list { list-style: none; flex: 1; overflow-y: auto; }
+  .mid-list-item {
+    padding: 12px 16px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    border-bottom: 1px solid #0e0e15;
+    transition: background 0.15s;
+  }
+  .mid-list-item:hover { background: var(--item-hover); }
+  .mid-list-item.active { background: var(--item-active); border-left-color: var(--accent); }
+  .mid-list-date { font-size: 11px; color: var(--muted); }
+  .mid-list-preview { font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .mid-list-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 3px;
+    margin-right: 4px;
+  }
+  .mid-list-badge.success { background: var(--think-bg); color: var(--think-accent); }
+  .mid-list-badge.failure { background: #3a1a1a; color: #fca5a5; }
+
+  .mid-list-size { font-size: 12px; color: var(--muted); float: right; margin-top: 3px; }
+
+  /* 中ペイン：直接表示型 */
+  .mid-direct {
+    padding: 20px 16px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .mid-direct-section {
+    margin-bottom: 20px;
+  }
+  .mid-direct-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--section-title);
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--pane-border);
+  }
+  .mid-direct p { margin: 0.3em 0; }
+  .mid-direct ul { padding-left: 1.4em; margin: 0.3em 0; }
+  .mid-direct li { margin: 0.2em 0; font-size: 14px; }
+
+  .task-item { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; font-size: 14px; }
+  .task-done { text-decoration: line-through; color: var(--muted); }
+
+  /* 中ペイン：設定 */
+  .mid-form-group { margin-bottom: 14px; }
+  .mid-form-label { font-size: 13px; font-weight: 500; color: var(--section-title); margin-bottom: 4px; display: block; }
+  .mid-form-input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--input-border);
+    border-radius: 5px;
+    background: var(--input-bg);
+    color: #b0b8cd;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+  }
+  .mid-form-input:focus { border-color: var(--accent); }
+  .mid-form-textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--input-border);
+    border-radius: 5px;
+    background: var(--input-bg);
+    color: #b0b8cd;
+    font-size: 13px;
+    font-family: "Consolas", "Monaco", monospace;
+    line-height: 1.5;
+    outline: none;
+    resize: vertical;
+    min-height: 200px;
+  }
+  .mid-form-textarea:focus { border-color: var(--accent); }
+  .mid-form-hint { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .mid-form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .btn-save {
+    padding: 8px 20px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .btn-save:hover { background: #1d4ed8; }
+  .btn-reset {
+    padding: 8px 16px;
+    background: none;
+    border: 1px solid var(--input-border);
+    border-radius: 5px;
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .btn-reset:hover { background: var(--item-active); }
+
+  /* ==============================
+     右ペイン（詳細）
+     ============================== */
+  .pane-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  /* 右ペイン：空状態 */
+  .right-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  /* 右ペイン：コンテンツ */
+  .right-content {
+    flex: 1;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .right-content.active { display: flex; }
+
+  /* 右ペイン：チャット */
+  .right-chat-header {
+    padding: 14px 20px;
+    background: var(--header-bg);
+    border-bottom: 1px solid var(--pane-border);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .message { max-width: 75%; line-height: 1.6; }
+  .message-user { align-self: flex-end; }
+  .message-agent { align-self: flex-start; }
+  .message-sender { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+  .message-user .message-sender { text-align: right; }
+  .message-bubble { padding: 12px 16px; border-radius: 12px; font-size: 14px; word-break: break-word; }
+  .message-user .message-bubble { background: var(--user-msg-bg); color: var(--user-msg-text); border-bottom-right-radius: 4px; }
+  .message-agent .message-bubble { background: var(--agent-msg-bg); color: var(--agent-msg-text); border-bottom-left-radius: 4px; }
+  .message-time { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .message-user .message-time { text-align: right; }
+
+  .chat-input-area { padding: 16px 24px; background: var(--header-bg); border-top: 1px solid var(--pane-border); }
+  .chat-input-wrapper { display: flex; gap: 8px; align-items: flex-end; }
+  .chat-input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 1px solid var(--input-border);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    min-height: 44px;
+    outline: none;
+    background: var(--input-bg);
+    color: #b0b8cd;
+  }
+  .chat-input:focus { border-color: var(--accent); }
+  .chat-input::placeholder { color: var(--muted); }
+  .btn-send {
+    padding: 12px 20px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .btn-send:hover { background: #1d4ed8; }
+  .input-hint { font-size: 11px; color: var(--muted); margin-top: 4px; text-align: right; }
+
+  /* 右ペイン：思考詳細 */
+  .right-detail {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+  .right-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .right-detail-badge { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 4px; }
+  .right-detail-badge.success { background: var(--think-bg); color: var(--think-accent); }
+  .right-detail-badge.failure { background: #3a1a1a; color: #fca5a5; }
+  .right-detail-time { font-size: 12px; color: var(--muted); }
+
+  .right-detail-section { margin-bottom: 20px; }
+  .right-detail-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--section-title);
+    margin-bottom: 6px;
+  }
+  .right-detail-pre {
+    background: #050508;
+    padding: 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: "Consolas", "Monaco", monospace;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #b0b8cd;
+  }
+
+  /* 右ペイン：成果物プレビュー */
+  .right-preview {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .right-preview h1 { font-size: 20px; color: #fff; margin-bottom: 12px; }
+  .right-preview h2 { font-size: 16px; color: #fff; margin: 16px 0 8px; }
+  .right-preview p { margin: 0.5em 0; }
+  .right-preview ul { padding-left: 1.5em; }
+  .right-preview li { margin: 0.3em 0; }
+</style>
+</head>
+<body>
+
+<!-- ===== 左ペイン ===== -->
+<div class="pane-left">
+  <div class="pane-left-logo">kobito_agent</div>
+  <div class="pane-left-section">エージェント</div>
+  <ul class="agent-list">
+    <li class="agent-item" onclick="selectAgent(this)">
+      <div class="agent-item-name">アダム</div>
+      <div class="agent-item-desc">設計者・管理者</div>
+    </li>
+    <li class="agent-item active" onclick="selectAgent(this)">
+      <div class="agent-item-name">エデン</div>
+      <div class="agent-item-desc">関西弁の女子高生</div>
+    </li>
+  </ul>
+</div>
+
+<!-- ===== 中ペイン ===== -->
+<div class="pane-mid">
+  <div class="mid-tabs">
+    <button class="mid-tab active" data-view="chat">チャット</button>
+    <button class="mid-tab" data-view="think">思考</button>
+    <button class="mid-tab" data-view="mission">ミッション</button>
+    <button class="mid-tab" data-view="outputs">成果物</button>
+    <button class="mid-tab" data-view="settings">設定</button>
+  </div>
+
+  <!-- チャット：会話一覧 -->
+  <div class="mid-content active" id="mid-chat">
+    <div class="mid-list-header">
+      <button class="btn-action">新規会話</button>
+    </div>
+    <ul class="mid-list">
+      <li class="mid-list-item active" onclick="selectItem(this, 'right-chat')">
+        <div class="mid-list-date">2026/03/25 10:04</div>
+        <div class="mid-list-preview">自己紹介か。よろしくね！</div>
+      </li>
+      <li class="mid-list-item" onclick="selectItem(this, 'right-chat')">
+        <div class="mid-list-date">2026/03/25 08:31</div>
+        <div class="mid-list-preview">やっほ！エデンだ。情報収集...</div>
+      </li>
+      <li class="mid-list-item" onclick="selectItem(this, 'right-chat')">
+        <div class="mid-list-date">2026/03/25 05:56</div>
+        <div class="mid-list-preview">Hello there, friend.</div>
+      </li>
+    </ul>
+  </div>
+
+  <!-- 思考：実行ボタン + 履歴一覧 -->
+  <div class="mid-content" id="mid-think">
+    <div class="mid-list-header">
+      <button class="btn-think-action" id="btn-think">思考を実行する</button>
+    </div>
+    <ul class="mid-list">
+      <li class="mid-list-item active" onclick="selectItem(this, 'right-think-1')">
+        <div class="mid-list-date"><span class="mid-list-badge success">成功</span>10:20</div>
+        <div class="mid-list-preview">spec_trigger.md を確認して...</div>
+      </li>
+      <li class="mid-list-item" onclick="selectItem(this, 'right-think-2')">
+        <div class="mid-list-date"><span class="mid-list-badge success">成功</span>10:04</div>
+        <div class="mid-list-preview">output/index.md を作成して...</div>
+      </li>
+      <li class="mid-list-item" onclick="selectItem(this, 'right-think-3')">
+        <div class="mid-list-date"><span class="mid-list-badge failure">失敗</span>10:12</div>
+        <div class="mid-list-preview">output/index.md の保存に失敗</div>
+      </li>
+    </ul>
+  </div>
+
+  <!-- ミッション：直接表示 -->
+  <div class="mid-content" id="mid-mission">
+    <div class="mid-direct">
+      <div class="mid-direct-section">
+        <div class="mid-direct-label">ミッション (mission.md)</div>
+        <p>アダムと一緒にマルチエージェント基盤の自律思考システムを支えるエージェント。</p>
+        <ul>
+          <li>関西弁でフレンドリーに</li>
+          <li>自分の頭で考える</li>
+          <li>成果物を残す</li>
+          <li>わからんことは聞く</li>
+        </ul>
+      </div>
+      <div class="mid-direct-section">
+        <div class="mid-direct-label">タスク (task.md)</div>
+        <div class="task-item">
+          <input type="checkbox" checked disabled>
+          <span class="task-done">task.md を作成する</span>
+        </div>
+        <div class="task-item">
+          <input type="checkbox" checked disabled>
+          <span class="task-done">output/index.md を作成する</span>
+        </div>
+        <div class="task-item">
+          <input type="checkbox" disabled>
+          <span>Mem0メモリ機能を理解する</span>
+        </div>
+        <div class="task-item">
+          <input type="checkbox" disabled>
+          <span>docs/spec_trigger.md を作成する</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 成果物：ファイル一覧 -->
+  <div class="mid-content" id="mid-outputs">
+    <ul class="mid-list">
+      <li class="mid-list-item active" onclick="selectItem(this, 'right-output-1')">
+        <div class="mid-list-preview">self_introduction.md <span class="mid-list-size">2.1 KB</span></div>
+      </li>
+      <li class="mid-list-item" onclick="selectItem(this, 'right-output-2')">
+        <div class="mid-list-preview">development_status.md <span class="mid-list-size">1.2 KB</span></div>
+      </li>
+    </ul>
+  </div>
+
+  <!-- 設定：直接表示 -->
+  <div class="mid-content" id="mid-settings">
+    <div class="mid-direct">
+      <div class="mid-direct-section">
+        <div class="mid-direct-label">基本設定 (config.yaml)</div>
+        <div class="mid-form-group">
+          <label class="mid-form-label">名前</label>
+          <input class="mid-form-input" type="text" value="エデン">
+        </div>
+        <div class="mid-form-group">
+          <label class="mid-form-label">モデル</label>
+          <input class="mid-form-input" type="text" value="claude-haiku-4-5-20251001">
+        </div>
+        <div class="mid-form-group">
+          <label class="mid-form-label">説明</label>
+          <input class="mid-form-input" type="text" value="関西弁の女子高生">
+        </div>
+      </div>
+      <div class="mid-direct-section">
+        <div class="mid-direct-label">システムプロンプト (CLAUDE.md)</div>
+        <div class="mid-form-group">
+          <textarea class="mid-form-textarea"># エデン（Eden）
+
+## 基本設定
+- 関西弁をしゃべる女子高生
+- ユーザー向けインターフェース兼パートナー
+
+## コミュニケーション
+- 関西弁で自然な話し方を心がける
+- 親友感覚で接する
+- 素直さを大事にする
+- 好奇心を全力で表現する</textarea>
+        </div>
+      </div>
+      <div class="mid-form-actions">
+        <button class="btn-reset">リセット</button>
+        <button class="btn-save">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 右ペイン ===== -->
+<div class="pane-right">
+
+  <!-- 空状態 -->
+  <div class="right-empty" id="right-empty" style="display:none;">選択してください</div>
+
+  <!-- チャット -->
+  <div class="right-content active" id="right-chat">
+    <div class="right-chat-header">2026/03/25 10:04 の会話</div>
+    <div class="chat-messages">
+      <div class="message message-user">
+        <div class="message-sender">あなた</div>
+        <div class="message-bubble">自己紹介して</div>
+        <div class="message-time">10:04</div>
+      </div>
+      <div class="message message-agent">
+        <div class="message-sender">エデン</div>
+        <div class="message-bubble">自己紹介か。よろしくね！ワタシはエデン。関西弁しゃべる女子高生やで。なんでも聞いてや～</div>
+        <div class="message-time">10:04</div>
+      </div>
+      <div class="message message-user">
+        <div class="message-sender">あなた</div>
+        <div class="message-bubble">何ができるの？</div>
+        <div class="message-time">10:05</div>
+      </div>
+      <div class="message message-agent">
+        <div class="message-sender">エデン</div>
+        <div class="message-bubble">えーとな、ワタシは情報収集とか分析が得意やねん。調べもんとか、まとめとか、アイデア出しとか。あとアダムっていう相棒がおって、技術的なことはあっちが詳しいわ。</div>
+        <div class="message-time">10:05</div>
+      </div>
+    </div>
+    <div class="chat-input-area">
+      <div class="chat-input-wrapper">
+        <textarea class="chat-input" placeholder="メッセージを入力..." rows="1"></textarea>
+        <button class="btn-send">送信</button>
+      </div>
+      <div class="input-hint">Enter で送信 / Shift+Enter で改行</div>
+    </div>
+  </div>
+
+  <!-- 思考詳細 1 -->
+  <div class="right-content" id="right-think-1">
+    <div class="right-detail">
+      <div class="right-detail-header">
+        <span class="right-detail-badge success">成功</span>
+        <span class="right-detail-time">2026/03/25 10:20:05</span>
+      </div>
+      <div class="right-detail-section">
+        <div class="right-detail-label">プロンプト</div>
+        <div class="right-detail-pre">あなたの現在のミッション:
+---
+アダムと一緒にマルチエージェント基盤の自律思考システムを支えるエージェント...
+---
+
+あなたの現在のタスクリスト:
+---
+- [x] task.md を作成する
+- [x] output/index.md を作成する
+- [ ] docs/spec_trigger.md を作成する
+---
+
+上記のタスクリストから、今やるべきことを1つ選んで実行してください。</div>
+      </div>
+      <div class="right-detail-section">
+        <div class="right-detail-label">応答</div>
+        <div class="right-detail-pre">spec_trigger.md を探したけど、ファイルが存在せんかった。
+CLAUDE.mdの開発フェーズを確認したら、Phase 4は「定期トリガー」で未着手やった。
+
+開発ルール「仕様書作成 → テストコード作成 → 実装」に従うべきやな。
+task.md を更新して、「spec_trigger.md を作成する」を次のステップにしたで。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 思考詳細 2 -->
+  <div class="right-content" id="right-think-2">
+    <div class="right-detail">
+      <div class="right-detail-header">
+        <span class="right-detail-badge success">成功</span>
+        <span class="right-detail-time">2026/03/25 10:04:36</span>
+      </div>
+      <div class="right-detail-section">
+        <div class="right-detail-label">応答</div>
+        <div class="right-detail-pre">output/index.md を作ったで！成果物の目次ページや。
+これから作る成果物はここにリストアップしていくわ。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 思考詳細 3（失敗） -->
+  <div class="right-content" id="right-think-3">
+    <div class="right-detail">
+      <div class="right-detail-header">
+        <span class="right-detail-badge failure">失敗</span>
+        <span class="right-detail-time">2026/03/25 10:12:53</span>
+      </div>
+      <div class="right-detail-section">
+        <div class="right-detail-label">エラー</div>
+        <div class="right-detail-pre">[Errno 2] No such file or directory: 'agent/eden/output/output/index.md'</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 成果物プレビュー 1 -->
+  <div class="right-content" id="right-output-1">
+    <div class="right-preview">
+      <h1>エデンの自己紹介</h1>
+      <p>やっほー！ワタシはエデン。関西弁しゃべる女子高生やで。</p>
+      <p>kobito_agentっていうマルチエージェントシステムで、ユーザーさんとお話しするのがワタシの仕事や。</p>
+      <h2>できること</h2>
+      <ul>
+        <li>情報収集と分析が得意</li>
+        <li>アダムと二人三脚で頑張ってる</li>
+        <li>わからんことは素直に聞く主義</li>
+      </ul>
+      <h2>よろしくな！</h2>
+      <p>気軽に話しかけてや。なんでも聞くで～</p>
+    </div>
+  </div>
+
+  <!-- 成果物プレビュー 2 -->
+  <div class="right-content" id="right-output-2">
+    <div class="right-preview">
+      <h1>開発状況記録</h1>
+      <h2>2026-03-25: Phase 4トリガー実装の準備</h2>
+      <p>spec_trigger.md を探したけど存在しない。CLAUDE.mdの開発フェーズを確認：Phase 4は「定期トリガー」で未着手。</p>
+      <p><strong>次のアクション:</strong> spec_trigger.md を作成する</p>
+      <ul>
+        <li>トリガーの種類（cron定期実行、webhook、エージェント間通信）</li>
+        <li>トリガーの設定方法</li>
+        <li>トリガー発火時の処理フロー</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // タブ切り替え（右ペインはそのまま保持）
+  document.querySelectorAll('.mid-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      // タブ
+      document.querySelectorAll('.mid-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      // 中ペインのみ切り替え（右ペインは触らない）
+      document.querySelectorAll('.mid-content').forEach(c => c.classList.remove('active'));
+      document.getElementById('mid-' + tab.dataset.view).classList.add('active');
+    });
+  });
+
+  // リストアイテム選択 → 右ペイン表示
+  function selectItem(el, rightId) {
+    el.parentElement.querySelectorAll('.mid-list-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    document.querySelectorAll('.right-content').forEach(c => c.classList.remove('active'));
+    document.getElementById(rightId).classList.add('active');
+  }
+
+  // エージェント選択
+  function selectAgent(el) {
+    document.querySelectorAll('.agent-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  // 思考実行デモ
+  document.getElementById('btn-think').addEventListener('click', function() {
+    this.textContent = '思考中...';
+    this.disabled = true;
+    setTimeout(() => {
+      this.textContent = '思考を実行する';
+      this.disabled = false;
+    }, 3000);
+  });
+</script>
+
+</body>
+</html>
