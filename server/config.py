@@ -37,6 +37,41 @@ class ConfigManager:
     def __init__(self, agents_dir: Path):
         self._agents_dir = Path(agents_dir)
 
+    def _ensure_agent_dir(self, agent_id: str) -> Path:
+        """エージェントディレクトリを返す。存在しなければ AgentNotFoundError"""
+        agent_dir = self._agents_dir / agent_id
+        if not agent_dir.is_dir() or not (agent_dir / "config.yaml").exists():
+            raise AgentNotFoundError(f"エージェント '{agent_id}' が見つかりません")
+        return agent_dir
+
+    def update_config(self, agent_id: str, name: str, model: str, description: str) -> AgentConfig:
+        """config.yaml を更新する。未知フィールドを保持してマージする。更新後の AgentConfig を返す"""
+        if not name:
+            raise ValueError("名前は必須です")
+        if not model:
+            raise ValueError("モデルは必須です")
+
+        agent_dir = self._ensure_agent_dir(agent_id)
+        config_path = agent_dir / "config.yaml"
+
+        # 既存の内容を読み込み（未知フィールドを保持するため）
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+        # 更新
+        raw["name"] = name
+        raw["model"] = model
+        raw["description"] = description
+
+        # 書き戻し
+        config_path.write_text(yaml.dump(raw, allow_unicode=True), encoding="utf-8")
+
+        return AgentConfig(name=name, model=model, description=description)
+
+    def update_system_prompt(self, agent_id: str, content: str) -> None:
+        """CLAUDE.md を更新する。存在しなければ新規作成する"""
+        agent_dir = self._ensure_agent_dir(agent_id)
+        (agent_dir / "CLAUDE.md").write_text(content, encoding="utf-8")
+
     def list_agents(self) -> list[AgentInfo]:
         """全エージェントの情報を返す。毎回ファイルを読み直す"""
         if not self._agents_dir.exists():

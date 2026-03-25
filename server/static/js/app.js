@@ -11,15 +11,24 @@
   const chatInputEl = document.getElementById("chat-input");
   const btnSendEl = document.getElementById("btn-send");
   const btnNewConvEl = document.getElementById("btn-new-conversation");
+  const btnLaunchCliEl = document.getElementById("btn-launch-cli");
+  const btnSettingsEl = document.getElementById("btn-settings");
+  const btnBackChatEl = document.getElementById("btn-back-chat");
+  const chatViewEl = document.getElementById("chat-view");
+  const settingsViewEl = document.getElementById("settings-view");
 
   // --- 状態 ---
   let agents = [];
   let currentAgentId = null;
   let currentConversationId = null;
+  let currentSessionId = null;
   let isSending = false;
+  let inSettingsView = false;
 
   // --- 初期化 ---
   Chat.init(chatMessagesEl);
+  Settings.init();
+  showChatView();
 
   // --- エージェント一覧読み込み ---
   agents = await API.getAgents();
@@ -51,8 +60,57 @@
     }
   }
 
+  // --- 画面切り替え ---
+  function showChatView() {
+    inSettingsView = false;
+    chatViewEl.classList.remove("hidden");
+    settingsViewEl.classList.add("hidden");
+    btnSettingsEl.style.display = "";
+    btnNewConvEl.style.display = "";
+    btnLaunchCliEl.style.display = "";
+    btnBackChatEl.style.display = "none";
+  }
+
+  function showSettingsView() {
+    inSettingsView = true;
+    chatViewEl.classList.add("hidden");
+    settingsViewEl.classList.remove("hidden");
+    btnSettingsEl.style.display = "none";
+    btnNewConvEl.style.display = "none";
+    btnLaunchCliEl.style.display = "none";
+    btnBackChatEl.style.display = "";
+
+    const agent = agents.find((a) => a.agent_id === currentAgentId);
+    if (agent) Settings.load(agent);
+  }
+
+  btnSettingsEl.addEventListener("click", showSettingsView);
+  btnBackChatEl.addEventListener("click", () => {
+    if (!Settings.confirmDiscard()) return;
+    showChatView();
+  });
+
+  // 設定画面の保存ボタン
+  document.getElementById("btn-save").addEventListener("click", async () => {
+    const saved = await Settings.save(currentAgentId);
+    if (saved) {
+      // エージェント一覧を再取得して反映
+      agents = await API.getAgents();
+      renderAgentList();
+      // ヘッダーも更新
+      const agent = agents.find((a) => a.agent_id === currentAgentId);
+      if (agent) {
+        headerNameEl.textContent = agent.config.name;
+        headerModelEl.textContent = agent.config.model;
+      }
+    }
+  });
+
   // --- エージェント選択 ---
   async function selectAgent(agentId) {
+    // 設定画面で未保存の変更がある場合、確認ダイアログ
+    if (inSettingsView && !Settings.confirmDiscard()) return;
+
     currentAgentId = agentId;
     currentConversationId = null;
 
@@ -66,6 +124,11 @@
     headerNameEl.textContent = agent.config.name;
     headerModelEl.textContent = agent.config.model;
     Chat.setAgentName(agent.config.name);
+
+    // 設定画面ならフォームを更新
+    if (inSettingsView) {
+      Settings.load(agent);
+    }
 
     // 入力有効化
     chatInputEl.disabled = false;
@@ -124,6 +187,9 @@
     const agent = agents.find((a) => a.agent_id === currentAgentId);
     const conv = await API.getConversation(currentAgentId, conversationId);
     Chat.renderHistory(conv.messages, agent.config.name);
+
+    // セッションID表示
+    updateSessionId(conv.session_id);
   }
 
   // --- 新規会話 ---
@@ -131,11 +197,26 @@
     currentConversationId = null;
     Chat.clear();
     chatInputEl.focus();
+    updateSessionId(null);
 
     // 会話一覧のハイライトを解除
     conversationListEl.querySelectorAll(".conversation-item").forEach((el) => {
       el.classList.remove("active");
     });
+  });
+
+  // --- Claude CLI起動 ---
+  btnLaunchCliEl.addEventListener("click", async () => {
+    if (!currentAgentId) return;
+    btnLaunchCliEl.disabled = true;
+    btnLaunchCliEl.textContent = "起動中...";
+    try {
+      await API.launchCLI(currentAgentId, currentSessionId);
+    } catch (e) {
+      alert("CLI起動に失敗しました: " + e.message);
+    }
+    btnLaunchCliEl.textContent = "Claude起動";
+    btnLaunchCliEl.disabled = false;
   });
 
   // --- メッセージ送信 ---
@@ -199,6 +280,27 @@
   });
 
   chatInputEl.addEventListener("input", updateSendButton);
+
+  // --- セッションID表示 ---
+  const headerSessionEl = document.getElementById("header-session");
+
+  function updateSessionId(sessionId) {
+    currentSessionId = sessionId;
+    if (sessionId) {
+      headerSessionEl.textContent = `claude --resume ${sessionId}`;
+      headerSessionEl.style.cursor = "pointer";
+      headerSessionEl.title = "クリックでコピー";
+      headerSessionEl.onclick = () => {
+        navigator.clipboard.writeText(`claude --resume ${sessionId}`);
+        const original = headerSessionEl.textContent;
+        headerSessionEl.textContent = "コピーしました";
+        setTimeout(() => { headerSessionEl.textContent = original; }, 1000);
+      };
+    } else {
+      headerSessionEl.textContent = "";
+      headerSessionEl.onclick = null;
+    }
+  }
 
   // --- ユーティリティ ---
   function formatDate(isoStr) {

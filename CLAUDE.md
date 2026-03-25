@@ -53,13 +53,14 @@ kobito_agent/
 
 ### 開発フェーズ
 
-| # | フェーズ | やること | コンポーネント |
-|---|---------|---------|--------------|
-| 1 | 基盤 | configを読み、Web UIからエージェントとチャットできる | config, runner, web, chat |
-| 2 | 自律作業 | mission/taskを読み、作業を実行し、成果物を出力する | runner, web |
-| 3 | 定期トリガー | 定期トリガーで自律思考サイクルを回す | trigger(cron) |
-| 4 | エージェント間通信 | エージェント同士がトリガーで会話する | trigger |
-| 5 | 記憶 | Mem0による記憶の保存・想起 | memory |
+| # | フェーズ | やること | コンポーネント | 状態 |
+|---|---------|---------|--------------|------|
+| 1 | 基盤 | configを読み、Web UIからエージェントとチャットできる | config, runner, web, chat | 完了 |
+| 2 | 設定管理 | Web UIからconfig.yaml・CLAUDE.mdを編集できる | config, web | 未着手 |
+| 3 | 自律作業 | mission/taskを読み、自律的に作業を実行し、成果物を出力する | runner, web | 未着手 |
+| 4 | 定期トリガー | 定期トリガーで自律思考サイクルを回す | trigger(cron) | 未着手 |
+| 5 | エージェント間通信 | エージェント同士がトリガーで会話する | trigger | 未着手 |
+| 6 | 記憶 | Mem0による記憶の保存・想起 | memory | 未着手 |
 
 ## エージェント
 
@@ -165,6 +166,14 @@ kobito_agent/
 
 ## プロジェクト情報
 
+### サーバー
+
+- **ポート**: 8300（`run.py` の `DEFAULT_PORT`）
+- **起動**: `start.bat`（ダブルクリック）。サーバーログ表示用のウィンドウが開き、ブラウザが自動で起動する
+- **URL**: http://localhost:8300
+- **ホットリロード**: uvicorn + watchfiles。`server/` 以下のファイル変更で自動再起動。サーバーの標準出力を `>nul` にリダイレクトするとリローダーが壊れるので禁止
+- **停止**: サーバーウィンドウを閉じる
+
 ### GitHub
 
 - **リポジトリURL**: https://github.com/masaru0ta/kobito_agent
@@ -173,6 +182,10 @@ kobito_agent/
 
 - pair-agent (D:\AI\code\pair-agent) — 2体AIエージェントの自律思考実験。kobito_agentはこれをシンプルに再設計したもの
 - eden (D:\AI\code\eden) — アダムとエデンの自律思考実験。pair-agentの前身
+
+## 注意事項
+
+- **プロジェクト共有のファイル（仕様書 `docs/`、テスト `tests/`、サーバー `server/` 等）はプロジェクトルートから探すこと**。エージェントディレクトリ（`agents/{name}/`）をcwdにしている場合でも、共有ファイルの検索パスはプロジェクトルート（`D:\AI\code\kobito_agent`）を指定する
 
 ## YOU MUST:
 - 回答は日本語で行うこと

@@ -155,6 +155,14 @@ body {
   margin-top: 2px;
 }
 
+.chat-header-session {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  font-family: monospace;
+  opacity: 0.7;
+}
+
 .btn {
   padding: 8px 16px;
   border: 1px solid var(--input-border);
@@ -363,4 +371,189 @@ body {
   color: var(--muted);
   margin-top: 6px;
   text-align: right;
+}
+
+/* --- ヘッダーアクション --- */
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-settings {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- チャット/設定 画面切り替え --- */
+.chat-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-view.hidden {
+  display: none;
+}
+
+.settings-view {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px;
+  background: var(--chat-bg);
+}
+
+.settings-view.hidden {
+  display: none;
+}
+
+.settings-container {
+  max-width: 960px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.settings-section {
+  margin-bottom: 32px;
+}
+
+.settings-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--section-title);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #1a1a25;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: #b0b8cd;
+  margin-bottom: 6px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+  background: var(--input-bg);
+  color: #b0b8cd;
+}
+
+.form-input:focus {
+  border-color: var(--accent);
+}
+
+.form-input::placeholder {
+  color: var(--muted);
+}
+
+.form-input.error {
+  border-color: #ef4444;
+}
+
+.form-textarea {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: "Consolas", "Monaco", "Noto Sans JP", monospace;
+  line-height: 1.6;
+  outline: none;
+  transition: border-color 0.15s;
+  background: var(--input-bg);
+  color: #b0b8cd;
+  resize: vertical;
+  min-height: 300px;
+}
+
+.form-textarea:focus {
+  border-color: var(--accent);
+}
+
+.form-error {
+  font-size: 12px;
+  color: #ef4444;
+  margin-top: 4px;
+  display: none;
+}
+
+.form-error.visible {
+  display: block;
+}
+
+.form-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid #1a1a25;
+}
+
+.btn-save {
+  padding: 10px 24px;
+  background: var(--accent);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-save:hover {
+  background: #1d4ed8;
+}
+
+.btn-save.saved {
+  background: #22c55e;
+}
+
+.btn-reset {
+  padding: 10px 24px;
+  background: transparent;
+  color: #b0b8cd;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-reset:hover {
+  background: #1a1a25;
+}
+
+.save-feedback {
+  font-size: 13px;
+  color: #22c55e;
+  align-self: center;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.save-feedback.visible {
+  opacity: 1;
 }

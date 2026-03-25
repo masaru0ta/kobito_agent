@@ -26,6 +26,41 @@ const API = {
     await fetch(`/api/agents/${agentId}/conversations/${conversationId}`, { method: "DELETE" });
   },
 
+  async updateConfig(agentId, name, model, description) {
+    const resp = await fetch(`/api/agents/${agentId}/config`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, model, description }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || "設定の保存に失敗しました");
+    }
+    return resp.json();
+  },
+
+  async updateSystemPrompt(agentId, content) {
+    const resp = await fetch(`/api/agents/${agentId}/system-prompt`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || "システムプロンプトの保存に失敗しました");
+    }
+    return resp.json();
+  },
+
+  async launchCLI(agentId, sessionId) {
+    const resp = await fetch(`/api/agents/${agentId}/launch-cli`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    return resp.json();
+  },
+
   /**
    * メッセージ送信（SSEストリーミング）
    * コールバック: onConversationId, onChunk, onDone

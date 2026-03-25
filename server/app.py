@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -17,6 +20,20 @@ from server.runner import Runner
 class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None
+
+
+class LaunchCLIRequest(BaseModel):
+    session_id: str | None = None
+
+
+class UpdateConfigRequest(BaseModel):
+    name: str
+    model: str
+    description: str
+
+
+class UpdateSystemPromptRequest(BaseModel):
+    content: str
 
 
 def create_app(agents_dir: Path | None = None, runner: Runner | None = None) -> FastAPI:
@@ -41,6 +58,26 @@ def create_app(agents_dir: Path | None = None, runner: Runner | None = None) -> 
             return config_manager.get_agent(agent_id).model_dump()
         except AgentNotFoundError:
             raise HTTPException(status_code=404, detail="エージェントが見つかりません")
+
+    # --- settings API ---
+
+    @app.put("/api/agents/{agent_id}/config")
+    def update_config(agent_id: str, req: UpdateConfigRequest):
+        try:
+            result = config_manager.update_config(agent_id, req.name, req.model, req.description)
+        except AgentNotFoundError:
+            raise HTTPException(status_code=404, detail="エージェントが見つかりません")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"agent_id": agent_id, "config": result.model_dump()}
+
+    @app.put("/api/agents/{agent_id}/system-prompt")
+    def update_system_prompt(agent_id: str, req: UpdateSystemPromptRequest):
+        try:
+            config_manager.update_system_prompt(agent_id, req.content)
+        except AgentNotFoundError:
+            raise HTTPException(status_code=404, detail="エージェントが見つかりません")
+        return {"agent_id": agent_id, "content": req.content}
 
     # --- chat API ---
 
@@ -89,6 +126,33 @@ def create_app(agents_dir: Path | None = None, runner: Runner | None = None) -> 
             chat_manager.delete_conversation(agent_id, conversation_id)
         except ConversationNotFoundError:
             raise HTTPException(status_code=404, detail="会話が見つかりません")
+
+    # --- CLI起動 API ---
+
+    @app.post("/api/agents/{agent_id}/launch-cli")
+    def launch_cli(agent_id: str, req: LaunchCLIRequest):
+        """エージェントのClaude CLIを新しいターミナルで起動する"""
+        try:
+            config_manager.get_agent(agent_id)
+        except AgentNotFoundError:
+            raise HTTPException(status_code=404, detail="エージェントが見つかりません")
+
+        session_id = req.session_id
+        agent_dir = agents_dir.resolve() / agent_id
+        if session_id:
+            cmd = f'claude --resume {session_id}'
+        else:
+            cmd = 'claude'
+
+        if sys.platform == "win32":
+            subprocess.Popen(
+                f'start cmd /k "cd /d {agent_dir} && {cmd}"',
+                shell=True,
+            )
+        else:
+            raise HTTPException(status_code=501, detail="Linux/macOS未対応")
+
+        return {"status": "launched", "session_id": session_id}
 
     # --- 静的ファイル配信（APIルートより後にマウント） ---
     static_dir = Path(__file__).parent / "static"

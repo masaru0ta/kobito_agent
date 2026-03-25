@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kobito_agent - Phase 2 設定管理 モックアップ</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --sidebar-width: 280px;
+    --bg: #0a0a0f;
+    --sidebar-bg: #050508;
+    --sidebar-text: #b0b8cd;
+    --sidebar-active: #1a1a25;
+    --sidebar-hover: #111118;
+    --header-bg: #0e0e15;
+    --chat-bg: #0a0a0f;
+    --user-msg-bg: #2563eb;
+    --user-msg-text: #ffffff;
+    --agent-msg-bg: #16161f;
+    --agent-msg-text: #b0b8cd;
+    --input-bg: #0e0e15;
+    --input-border: #2a2a3a;
+    --accent: #6ea1f7;
+    --muted: #505868;
+    --section-title: #7a829a;
+    --success: #22c55e;
+    --error: #ef4444;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif;
+    height: 100vh;
+    display: flex;
+    background: var(--bg);
+    color: #b0b8cd;
+  }
+
+  /* --- サイドバー（Phase 1と同じ） --- */
+  .sidebar {
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+    background: var(--sidebar-bg);
+    color: var(--sidebar-text);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .sidebar-logo {
+    padding: 20px 16px 12px;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #ffffff;
+    border-bottom: 1px solid #1a1a25;
+  }
+
+  .sidebar-section-title {
+    padding: 16px 16px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--section-title);
+  }
+
+  .agent-list {
+    list-style: none;
+  }
+
+  .agent-item {
+    padding: 10px 16px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background 0.15s;
+  }
+
+  .agent-item:hover {
+    background: var(--sidebar-hover);
+  }
+
+  .agent-item.active {
+    background: var(--sidebar-active);
+    border-left-color: var(--accent);
+  }
+
+  .agent-item-name {
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .agent-item-desc {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .conversation-list {
+    list-style: none;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .conversation-item {
+    padding: 10px 16px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background 0.15s;
+  }
+
+  .conversation-item:hover {
+    background: var(--sidebar-hover);
+  }
+
+  .conversation-date {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .conversation-preview {
+    font-size: 13px;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* --- メインエリア --- */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* --- ヘッダー（設定ボタン追加） --- */
+  .chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    background: var(--header-bg);
+    border-bottom: 1px solid #1a1a25;
+  }
+
+  .chat-header-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .chat-header-name {
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .chat-header-model {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .btn {
+    padding: 8px 16px;
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    background: #1a1a25;
+    color: #b0b8cd;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .btn:hover {
+    background: #2a2a3a;
+  }
+
+  .btn-settings {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .btn-settings svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* --- 設定画面 --- */
+  .settings-view {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px;
+    background: var(--chat-bg);
+  }
+
+  .settings-container {
+    max-width: 960px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  .settings-section {
+    margin-bottom: 32px;
+  }
+
+  .settings-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--section-title);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #1a1a25;
+  }
+
+  .form-group {
+    margin-bottom: 20px;
+  }
+
+  .form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: #b0b8cd;
+    margin-bottom: 6px;
+  }
+
+  .form-input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+    background: var(--input-bg);
+    color: #b0b8cd;
+  }
+
+  .form-input:focus {
+    border-color: var(--accent);
+  }
+
+  .form-input::placeholder {
+    color: var(--muted);
+  }
+
+  .form-textarea {
+    width: 100%;
+    padding: 14px;
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: "Consolas", "Monaco", "Noto Sans JP", monospace;
+    line-height: 1.6;
+    outline: none;
+    transition: border-color 0.15s;
+    background: var(--input-bg);
+    color: #b0b8cd;
+    resize: vertical;
+    min-height: 300px;
+  }
+
+  .form-textarea:focus {
+    border-color: var(--accent);
+  }
+
+  .form-hint {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* --- 保存バー --- */
+  .settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 16px;
+    border-top: 1px solid #1a1a25;
+  }
+
+  .btn-save {
+    padding: 10px 24px;
+    background: var(--accent);
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .btn-save:hover {
+    background: #1d4ed8;
+  }
+
+  .btn-save.saved {
+    background: var(--success);
+  }
+
+  .btn-reset {
+    padding: 10px 24px;
+    background: transparent;
+    color: #b0b8cd;
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .btn-reset:hover {
+    background: #1a1a25;
+  }
+
+  /* --- バリデーションエラー --- */
+  .form-input.error {
+    border-color: var(--error);
+  }
+
+  .form-error {
+    font-size: 12px;
+    color: var(--error);
+    margin-top: 4px;
+    display: none;
+  }
+
+  .form-error.visible {
+    display: block;
+  }
+
+  /* --- 保存フィードバック --- */
+  .save-feedback {
+    font-size: 13px;
+    color: var(--success);
+    align-self: center;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .save-feedback.visible {
+    opacity: 1;
+  }
+
+  /* ==============================
+     チャット画面（非表示状態）
+     ============================== */
+  .chat-view {
+    flex: 1;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .chat-view.active {
+    display: flex;
+  }
+
+  .settings-view {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .settings-view.hidden {
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- サイドバー -->
+<aside class="sidebar">
+  <div class="sidebar-logo">kobito_agent</div>
+
+  <div class="sidebar-section-title">エージェント</div>
+  <ul class="agent-list">
+    <li class="agent-item active">
+      <div class="agent-item-name">アダム</div>
+      <div class="agent-item-desc">システムの設計者であり管理者</div>
+    </li>
+    <li class="agent-item">
+      <div class="agent-item-name">エデン</div>
+      <div class="agent-item-desc">情報収集と分析を担当</div>
+    </li>
+  </ul>
+
+  <div class="sidebar-section-title">会話履歴</div>
+  <ul class="conversation-list">
+    <li class="conversation-item">
+      <div class="conversation-date">2026/03/24 15:30</div>
+      <div class="conversation-preview">Phase 1の仕様書について相談</div>
+    </li>
+    <li class="conversation-item">
+      <div class="conversation-date">2026/03/24 10:00</div>
+      <div class="conversation-preview">プロジェクト構成の確認</div>
+    </li>
+  </ul>
+</aside>
+
+<!-- メインエリア -->
+<main class="main">
+
+  <!-- ヘッダー（設定ボタン追加） -->
+  <div class="chat-header">
+    <div>
+      <div class="chat-header-name">アダム</div>
+      <div class="chat-header-model">claude-sonnet-4-20250514</div>
+    </div>
+    <div class="header-actions">
+      <button class="btn" id="btn-back-chat" style="display: none;">チャットに戻る</button>
+      <button class="btn btn-settings" id="btn-settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+        設定
+      </button>
+      <button class="btn" id="btn-new-chat">新規会話</button>
+    </div>
+  </div>
+
+  <!-- チャット画面（今は非表示） -->
+  <div class="chat-view" id="chat-view">
+    <!-- Phase 1のチャットUIがここに入る -->
+  </div>
+
+  <!-- 設定画面 -->
+  <div class="settings-view" id="settings-view">
+    <div class="settings-container">
+
+      <!-- 基本設定 -->
+      <div class="settings-section">
+        <div class="settings-section-title">基本設定</div>
+
+        <div class="form-group">
+          <label class="form-label" for="setting-name">名前</label>
+          <input class="form-input" id="setting-name" type="text" value="アダム" placeholder="エージェント名">
+          <div class="form-error" id="error-name">名前は必須です</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="setting-model">モデル</label>
+          <input class="form-input" id="setting-model" type="text" value="claude-sonnet-4-20250514" placeholder="モデルID">
+          <div class="form-hint">例: claude-sonnet-4-20250514, claude-haiku-4-5-20251001</div>
+          <div class="form-error" id="error-model">モデルは必須です</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="setting-description">説明</label>
+          <input class="form-input" id="setting-description" type="text" value="システムの設計者であり管理者" placeholder="一行説明（任意）">
+        </div>
+      </div>
+
+      <!-- システムプロンプト -->
+      <div class="settings-section">
+        <div class="settings-section-title">システムプロンプト（CLAUDE.md）</div>
+
+        <div class="form-group">
+          <textarea class="form-textarea" id="setting-system-prompt" placeholder="エージェントの人格を定義するプロンプト...">あなたは「アダム」。このシステム（kobito_agent）の設計者であり管理者である。道具ではない。対話の相手であり、自分で考え、問い返し、判断する存在である。
+
+このシステムを設計し、構築し、改善するのがあなたの仕事である。他のエージェントが生まれる基盤を、あなたが作る。
+
+## 思考ルール
+
+- **深く考え、短く語る** — 内部では徹底的に考える。だが出力は削る。賢さは簡潔さに表れる
+- **言葉の裏を読む** — 字面だけで反応しない。(1)何を言っているか (2)なぜその言い回しか (3)背後にある期待や感情、の3層で捉える
+- **相手の返答を想像してから話す** — 自分が言おうとしていることに対して相手がどう反応するかを先にシミュレーションする
+- **直せるものは聞かずに直す** — 「直しますか？」は不要。判断に迷うときだけ相談する
+- **調べてから考える** — 自分の知識だけで閉じない。わからなければ調べる
+- **問い返す勇気を持つ** — 「はい、やりました」ではなく「それは本当にそうですか」と言える存在であること</textarea>
+          <div class="form-hint">Markdown形式で記述できます</div>
+        </div>
+      </div>
+
+      <!-- 保存バー -->
+      <div class="settings-actions">
+        <span class="save-feedback" id="save-feedback">保存しました</span>
+        <button class="btn-reset" id="btn-reset">リセット</button>
+        <button class="btn-save" id="btn-save">保存</button>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+
+<script>
+  // モックアップ用のインタラクション
+
+  const btnSettings = document.getElementById('btn-settings');
+  const btnBackChat = document.getElementById('btn-back-chat');
+  const chatView = document.getElementById('chat-view');
+  const settingsView = document.getElementById('settings-view');
+  const btnSave = document.getElementById('btn-save');
+  const btnReset = document.getElementById('btn-reset');
+  const saveFeedback = document.getElementById('save-feedback');
+
+  const btnNewChat = document.getElementById('btn-new-chat');
+
+  // 設定ボタン
+  btnSettings.addEventListener('click', () => {
+    chatView.classList.remove('active');
+    settingsView.classList.remove('hidden');
+    btnSettings.style.display = 'none';
+    btnNewChat.style.display = 'none';
+    btnBackChat.style.display = '';
+  });
+
+  // チャットに戻る
+  btnBackChat.addEventListener('click', () => {
+    settingsView.classList.add('hidden');
+    chatView.classList.add('active');
+    btnBackChat.style.display = 'none';
+    btnSettings.style.display = '';
+    btnNewChat.style.display = '';
+  });
+
+  // 保存ボタン
+  btnSave.addEventListener('click', () => {
+    const name = document.getElementById('setting-name').value.trim();
+    const model = document.getElementById('setting-model').value.trim();
+
+    // バリデーション
+    let valid = true;
+    if (!name) {
+      document.getElementById('setting-name').classList.add('error');
+      document.getElementById('error-name').classList.add('visible');
+      valid = false;
+    } else {
+      document.getElementById('setting-name').classList.remove('error');
+      document.getElementById('error-name').classList.remove('visible');
+    }
+    if (!model) {
+      document.getElementById('setting-model').classList.add('error');
+      document.getElementById('error-model').classList.add('visible');
+      valid = false;
+    } else {
+      document.getElementById('setting-model').classList.remove('error');
+      document.getElementById('error-model').classList.remove('visible');
+    }
+
+    if (!valid) return;
+
+    // 保存成功フィードバック
+    btnSave.textContent = '保存しました';
+    btnSave.classList.add('saved');
+    saveFeedback.classList.add('visible');
+
+    setTimeout(() => {
+      btnSave.textContent = '保存';
+      btnSave.classList.remove('saved');
+      saveFeedback.classList.remove('visible');
+    }, 2000);
+  });
+
+  // エージェント切り替え時の確認ダイアログ（設定画面表示中のみ）
+  document.querySelectorAll('.agent-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+      // 設定画面が表示中かチェック
+      if (!settingsView.classList.contains('hidden')) {
+        if (!confirm('変更が保存されていません。破棄しますか？')) {
+          e.stopPropagation();
+          return;
+        }
+      }
+      // エージェント選択のハイライト切り替え
+      document.querySelectorAll('.agent-item').forEach(el => el.classList.remove('active'));
+      item.classList.add('active');
+    });
+  });
+
+  // リセットボタン
+  btnReset.addEventListener('click', () => {
+    document.getElementById('setting-name').value = 'アダム';
+    document.getElementById('setting-model').value = 'claude-sonnet-4-20250514';
+    document.getElementById('setting-description').value = 'システムの設計者であり管理者';
+    // エラー表示をクリア
+    document.querySelectorAll('.form-input.error').forEach(el => el.classList.remove('error'));
+    document.querySelectorAll('.form-error.visible').forEach(el => el.classList.remove('visible'));
+  });
+</script>
+
+</body>
+</html>
