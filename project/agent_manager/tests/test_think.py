@@ -3,12 +3,12 @@
 import json
 import re
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
 from server.config import AgentConfig, AgentInfo
-from server.runner import Message, Runner, RunResult, ThinkResult
+from server.runner import Runner, ThinkResult, DEFAULT_THINK_PROMPT
 
 
 @pytest.fixture
@@ -17,20 +17,13 @@ def runner():
 
 
 @pytest.fixture
-def agents_dir(tmp_path):
-    d = tmp_path / "agents"
-    d.mkdir()
-    return d
-
-
-@pytest.fixture
-def agent_dir(agents_dir):
-    """mission.md あり、task.md なしのエージェントディレクトリ"""
-    d = agents_dir / "adam"
-    d.mkdir()
+def agent_dir(tmp_path):
+    d = tmp_path / "agent" / "adam"
+    d.mkdir(parents=True)
     (d / "config.yaml").write_text("name: アダム\nmodel: claude-sonnet-4-20250514\n", encoding="utf-8")
     (d / "CLAUDE.md").write_text("あなたはアダム。", encoding="utf-8")
     (d / "mission.md").write_text("このシステムを設計し、構築する。", encoding="utf-8")
+    (d / "task.md").write_text("- [ ] テスト項目1\n- [ ] テスト項目2", encoding="utf-8")
     return d
 
 
@@ -41,142 +34,206 @@ def agent_info():
         config=AgentConfig(name="アダム", model="claude-sonnet-4-20250514"),
         system_prompt="あなたはアダム。",
         mission="このシステムを設計し、構築する。",
-        task="- [ ] テスト項目1\n- [ ] テスト項目2",
+        task="- [ ] テスト項目1",
     )
 
 
 @pytest.fixture
-def agent_info_no_mission():
+def agent_info_with_think_prompt():
     return AgentInfo(
         agent_id="adam",
         config=AgentConfig(name="アダム", model="claude-sonnet-4-20250514"),
         system_prompt="あなたはアダム。",
-        mission=None,
-        task=None,
+        mission="ミッション",
+        task="タスク",
+        think_prompt="カスタム思考プロンプト",
     )
 
 
 TEST_SESSION_ID = "think-session-1234"
 
 
-def _make_stream_output(text, session_id=TEST_SESSION_ID):
-    """claude -p --output-format stream-json の出力を模倣"""
-    result_line = json.dumps({
-        "type": "result", "subtype": "success",
-        "result": text, "session_id": session_id,
-    })
-    return f"{result_line}\n"
-
-
-def _mock_subprocess_run(text, session_id=TEST_SESSION_ID):
-    """subprocess.run のモックを返す"""
-    output = _make_stream_output(text, session_id)
-
-    def mock_run(cmd, **kwargs):
-        m = MagicMock()
-        m.returncode = 0
-        m.stdout = output.encode("utf-8")
-        m.stderr = b""
-        return m
-
-    return mock_run
-
-
 # ============================================================
-# mission.md / task.md の管理
+# 思考プロンプト
 # ============================================================
 
 
-class TestEnsureMission:
-    """mission.md の読み込み・生成テスト"""
+class TestThinkPrompt:
+    """思考プロンプトの選択テスト"""
 
-    async def test_reads_existing_mission(self, runner, agent_dir):
-        """mission.md が存在する場合、正しく読み込める"""
-        agent_info = AgentInfo(
-            agent_id="adam",
-            config=AgentConfig(name="アダム", model="claude-sonnet-4-20250514"),
-            system_prompt="あなたはアダム。",
-            mission="このシステムを設計し、構築する。",
-            task=None,
-        )
-        result = await runner._ensure_mission(agent_info, agent_dir)
-        assert result == "このシステムを設計し、構築する。"
+    async def test_uses_default_when_no_think_prompt(self, runner, agent_info, agent_dir):
+        """think_prompt.md がない場合、デフォルトプロンプトが使われる"""
+        prompts = []
 
-    async def test_generates_mission_when_missing(self, runner, agent_dir):
-        """mission.md が存在しない場合、LLMで生成して保存する"""
-        agent_info = AgentInfo(
-            agent_id="adam",
-            config=AgentConfig(name="アダム", model="claude-sonnet-4-20250514"),
-            system_prompt="あなたはアダム。",
-            mission=None,
-            task=None,
-        )
-        generated_mission = "# ミッション\n自律システムを構築する。"
+        async def mock_stream(ai, prompt, **kwargs):
+            prompts.append(prompt)
+            yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
 
-        with patch("subprocess.run", side_effect=_mock_subprocess_run(generated_mission)):
-            result = await runner._ensure_mission(agent_info, agent_dir)
+        with patch.object(runner, "_run_claude_stream", mock_stream):
+            async for _ in runner.think_stream(agent_info, agent_dir):
+                pass
 
-        assert result == generated_mission
-        assert (agent_dir / "mission.md").read_text(encoding="utf-8") == generated_mission
+        assert prompts[0] == DEFAULT_THINK_PROMPT
 
+    async def test_uses_custom_think_prompt(self, runner, agent_info_with_think_prompt, agent_dir):
+        """think_prompt.md がある場合、その内容がプロンプトとして使われる"""
+        prompts = []
 
-class TestEnsureTask:
-    """task.md の読み込み・生成テスト"""
+        async def mock_stream(ai, prompt, **kwargs):
+            prompts.append(prompt)
+            yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
 
-    async def test_reads_existing_task(self, runner, agent_dir):
-        """task.md が存在する場合、正しく読み込める"""
-        (agent_dir / "task.md").write_text("- [ ] タスク1", encoding="utf-8")
-        agent_info = AgentInfo(
-            agent_id="adam",
-            config=AgentConfig(name="アダム", model="claude-sonnet-4-20250514"),
-            system_prompt="あなたはアダム。",
-            mission="ミッション",
-            task="- [ ] タスク1",
-        )
-        result = await runner._ensure_task(agent_info, agent_dir, "ミッション")
-        assert result == "- [ ] タスク1"
+        with patch.object(runner, "_run_claude_stream", mock_stream):
+            async for _ in runner.think_stream(agent_info_with_think_prompt, agent_dir):
+                pass
 
-    async def test_generates_task_when_missing(self, runner, agent_dir):
-        """task.md が存在しない場合、LLMで生成して保存する"""
-        agent_info = AgentInfo(
-            agent_id="adam",
-            config=AgentConfig(name="アダム", model="claude-sonnet-4-20250514"),
-            system_prompt="あなたはアダム。",
-            mission="ミッション",
-            task=None,
-        )
-        generated_task = "- [ ] タスク1\n- [ ] タスク2"
+        assert prompts[0] == "カスタム思考プロンプト"
 
-        with patch("subprocess.run", side_effect=_mock_subprocess_run(generated_task)):
-            result = await runner._ensure_task(agent_info, agent_dir, "ミッション")
+    async def test_resume_uses_short_prompt(self, runner, agent_info, agent_dir):
+        """続行時は短縮プロンプトが使われる"""
+        prompts = []
 
-        assert result == generated_task
-        assert (agent_dir / "task.md").read_text(encoding="utf-8") == generated_task
+        async def mock_stream(ai, prompt, **kwargs):
+            prompts.append(prompt)
+            yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
+
+        with patch.object(runner, "_run_claude_stream", mock_stream):
+            async for _ in runner.think_stream(agent_info, agent_dir, session_id="prev-session"):
+                pass
+
+        assert "前回の続き" in prompts[0]
+        assert prompts[0] != DEFAULT_THINK_PROMPT
 
 
 # ============================================================
-# プロンプト組み立て
+# ストリーミング
 # ============================================================
 
 
-class TestBuildThinkPrompt:
-    """自律思考プロンプト組み立てのテスト"""
+class TestThinkStream:
+    """think_streamのストリーミングテスト"""
 
-    def test_includes_mission(self, runner):
-        """自律思考プロンプトに mission.md の内容が含まれる"""
-        prompt = runner._build_think_prompt("ミッション内容", "タスク内容")
-        assert "ミッション内容" in prompt
+    async def test_yields_prompt_event(self, runner, agent_info, agent_dir):
+        """think_stream がプロンプトイベントをyieldする"""
+        async def mock_stream(ai, prompt, **kwargs):
+            yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
 
-    def test_includes_task(self, runner):
-        """自律思考プロンプトに task.md の内容が含まれる"""
-        prompt = runner._build_think_prompt("ミッション内容", "タスク内容")
-        assert "タスク内容" in prompt
+        with patch.object(runner, "_run_claude_stream", mock_stream):
+            events = [ev async for ev in runner.think_stream(agent_info, agent_dir)]
 
-    def test_includes_file_operation_instructions(self, runner):
-        """自律思考プロンプトにファイル操作の指示が含まれる"""
-        prompt = runner._build_think_prompt("ミッション", "タスク")
-        assert "task.md" in prompt
-        assert "output/" in prompt
+        prompt_events = [e for e in events if e.get("type") == "prompt"]
+        assert len(prompt_events) == 1
+        assert prompt_events[0]["content"] == DEFAULT_THINK_PROMPT
+
+    async def test_yields_text_events(self, runner, agent_info, agent_dir):
+        """think_stream がテキストイベントをyieldする"""
+        async def mock_stream(ai, prompt, **kwargs):
+            yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "作業中"}]}}
+            yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
+
+        with patch.object(runner, "_run_claude_stream", mock_stream):
+            events = [ev async for ev in runner.think_stream(agent_info, agent_dir)]
+
+        text_events = [e for e in events if e.get("type") == "text"]
+        assert len(text_events) == 1
+        assert text_events[0]["content"] == "作業中"
+
+    async def test_yields_tool_use_events(self, runner, agent_info, agent_dir):
+        """think_stream がツール使用イベントをyieldする"""
+        async def mock_stream(ai, prompt, **kwargs):
+            yield {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Read", "input": {"file_path": "/path/to/task.md"}},
+            ]}}
+            yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
+
+        with patch.object(runner, "_run_claude_stream", mock_stream):
+            events = [ev async for ev in runner.think_stream(agent_info, agent_dir)]
+
+        tool_events = [e for e in events if e.get("type") == "tool_use"]
+        assert len(tool_events) == 1
+        assert "Read" in tool_events[0]["content"]
+        assert "task.md" in tool_events[0]["content"]
+
+    async def test_yields_result_event(self, runner, agent_info, agent_dir):
+        """think_stream が結果イベントをyieldする"""
+        async def mock_stream(ai, prompt, **kwargs):
+            yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "完了"}]}}
+            yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
+
+        # 報告フェーズのモック
+        report_call_count = 0
+        original_stream = runner._run_claude_stream
+
+        async def mock_stream_with_report(ai, prompt, **kwargs):
+            nonlocal report_call_count
+            report_call_count += 1
+            if report_call_count == 1:
+                # 作業フェーズ
+                yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "完了"}]}}
+                yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
+            else:
+                # 報告フェーズ
+                yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "## 報告\n- タスク完了"}]}}
+                yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
+
+        with patch.object(runner, "_run_claude_stream", mock_stream_with_report):
+            events = [ev async for ev in runner.think_stream(agent_info, agent_dir)]
+
+        result_events = [e for e in events if e.get("type") == "result"]
+        assert len(result_events) == 1
+        assert result_events[0]["success"] is True
+
+    async def test_error_yields_error_event(self, runner, agent_info, agent_dir):
+        """エラー時にエラーイベントをyieldする"""
+        async def mock_stream(ai, prompt, **kwargs):
+            raise RuntimeError("claude -p 失敗")
+            yield  # make it a generator
+
+        with patch.object(runner, "_run_claude_stream", mock_stream):
+            events = [ev async for ev in runner.think_stream(agent_info, agent_dir)]
+
+        error_events = [e for e in events if e.get("type") == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["success"] is False
+        assert "失敗" in error_events[0]["content"]
+
+
+# ============================================================
+# セッション管理
+# ============================================================
+
+
+class TestSessionManagement:
+    """セッション管理のテスト"""
+
+    async def test_saves_session_id(self, runner, agent_info, agent_dir):
+        """session_id が .think_session_id に保存される"""
+        async def mock_stream(ai, prompt, **kwargs):
+            yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
+
+        with patch.object(runner, "_run_claude_stream", mock_stream):
+            async for _ in runner.think_stream(agent_info, agent_dir):
+                pass
+
+        session_file = agent_dir / ".think_session_id"
+        assert session_file.exists()
+        assert session_file.read_text(encoding="utf-8") == TEST_SESSION_ID
+
+    async def test_resume_passes_session_id(self, runner, agent_info, agent_dir):
+        """続行時にsession_idが_run_claude_streamに渡される"""
+        first_call_kwargs = None
+
+        async def mock_stream(ai, prompt, **kwargs):
+            nonlocal first_call_kwargs
+            if first_call_kwargs is None:
+                first_call_kwargs = dict(kwargs)
+            yield {"type": "result", "result": "", "session_id": "new-session"}
+
+        with patch.object(runner, "_run_claude_stream", mock_stream):
+            async for _ in runner.think_stream(agent_info, agent_dir, session_id="prev-session"):
+                pass
+
+        assert first_call_kwargs.get("session_id") == "prev-session"
 
 
 # ============================================================
@@ -238,59 +295,34 @@ class TestSaveLog:
         assert saved["success"] is False
         assert saved["error"] == "実行エラー"
 
+    async def test_log_contains_events(self, runner, agent_info, agent_dir):
+        """ログにevents配列が含まれる"""
+        async def mock_stream(ai, prompt, **kwargs):
+            yield {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Read", "input": {"file_path": "task.md"}},
+            ]}}
+            yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "完了"}]}}
+            yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
 
-# ============================================================
-# think() の統合テスト
-# ============================================================
+        with patch.object(runner, "_run_claude_stream", mock_stream):
+            async for _ in runner.think_stream(agent_info, agent_dir):
+                pass
 
+        log_files = list((agent_dir / "log").glob("*.json"))
+        assert len(log_files) >= 1
+        saved = json.loads(log_files[0].read_text(encoding="utf-8"))
+        assert "events" in saved
+        assert len(saved["events"]) >= 2
 
-class TestThink:
-    """think() 統合テスト"""
+    async def test_log_contains_session_id(self, runner, agent_info, agent_dir):
+        """ログにsession_idが含まれる"""
+        async def mock_stream(ai, prompt, **kwargs):
+            yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
 
-    async def test_think_returns_think_result(self, runner, agent_dir):
-        """think() が正常に ThinkResult を返す"""
-        agent_info = AgentInfo(
-            agent_id="adam",
-            config=AgentConfig(name="アダム", model="claude-sonnet-4-20250514"),
-            system_prompt="あなたはアダム。",
-            mission="ミッション",
-            task="- [ ] タスク1",
-        )
-        (agent_dir / "task.md").write_text("- [ ] タスク1", encoding="utf-8")
+        with patch.object(runner, "_run_claude_stream", mock_stream):
+            async for _ in runner.think_stream(agent_info, agent_dir):
+                pass
 
-        response_text = "タスク1を完了しました。task.mdを更新しました。"
-        with patch("subprocess.run", side_effect=_mock_subprocess_run(response_text)):
-            result = await runner.think(agent_info, agent_dir)
-
-        assert isinstance(result, ThinkResult)
-        assert result.success is True
-        assert result.agent_id == "adam"
-        assert result.response == response_text
-        assert result.error is None
-
-    async def test_think_returns_result_on_error(self, runner, agent_dir):
-        """think() でエラーが発生しても ThinkResult を返す（success=false）"""
-        agent_info = AgentInfo(
-            agent_id="adam",
-            config=AgentConfig(name="アダム", model="claude-sonnet-4-20250514"),
-            system_prompt="あなたはアダム。",
-            mission="ミッション",
-            task="- [ ] タスク1",
-        )
-        (agent_dir / "task.md").write_text("- [ ] タスク1", encoding="utf-8")
-
-        # claude -p がエラーを返す
-        def mock_run_error(cmd, **kwargs):
-            m = MagicMock()
-            m.returncode = 1
-            m.stdout = b""
-            m.stderr = b"API Error"
-            return m
-
-        with patch("subprocess.run", side_effect=mock_run_error):
-            result = await runner.think(agent_info, agent_dir)
-
-        assert isinstance(result, ThinkResult)
-        assert result.success is False
-        assert result.error is not None
-        assert result.log_path is not None
+        log_files = list((agent_dir / "log").glob("*.json"))
+        saved = json.loads(log_files[0].read_text(encoding="utf-8"))
+        assert saved["session_id"] == TEST_SESSION_ID

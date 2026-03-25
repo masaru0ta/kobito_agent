@@ -51,12 +51,12 @@ kobito_agent/
 
 | コンポーネント | 役割 | 仕様書 | 状態 |
 |--------------|------|--------|------|
-| config | エージェント定義（名前・モデル・トリガー設定） | `docs/spec_config.md` | 未着手 |
+| config | エージェント定義（名前・モデル・トリガー設定） | `docs/spec_config.md` | 完了 |
 | memory | 記憶システム（Mem0ラッパー） | `docs/spec_memory.md` | 未着手 |
-| runner | 1回の思考サイクルを組み立てて実行するエンジン | `docs/spec_runner.md` | 未着手 |
-| trigger | トリガーエンジン（cron / webhook / エージェント間） | `docs/spec_trigger.md` | 未着手 |
-| chat | チャット処理（ユーザー×エージェント、エージェント間） | `docs/spec_chat.md` | 未着手 |
-| web | Web UI（チャット・設定・記憶閲覧・成果物） | `docs/spec_web.md` | 未着手 |
+| runner | 1回の思考サイクルを組み立てて実行するエンジン | `docs/spec_runner.md` | 完了 |
+| trigger | トリガーエンジン（cron / webhook / エージェント間） | `docs/spec_trigger.md` | 完了 |
+| chat | チャット処理（ユーザー×エージェント、エージェント間） | `docs/spec_chat.md` | 完了 |
+| web | Web UI（チャット・設定・記憶閲覧・成果物） | `docs/spec_web.md` | 完了 |
 
 ### 開発フェーズ
 
@@ -65,7 +65,7 @@ kobito_agent/
 | 1 | 基盤 | configを読み、Web UIからエージェントとチャットできる | config, runner, web, chat | 完了 |
 | 2 | 設定管理 | Web UIからconfig.yaml・CLAUDE.mdを編集できる | config, web | 完了 |
 | 3 | 自律作業 | mission/taskを読み、自律的に作業を実行し、成果物を出力する | runner, web | 完了 |
-| 4 | 定期トリガー | 定期トリガーで自律思考サイクルを回す | trigger(cron) | 未着手 |
+| 4 | 定期トリガー | 定期トリガーで自律思考サイクルを回す | trigger(cron) | 完了 |
 | 5 | エージェント間通信 | エージェント同士がトリガーで会話する | trigger | 未着手 |
 | 6 | 記憶 | Mem0による記憶の保存・想起 | memory | 未着手 |
 

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +17,25 @@ from typing import AsyncGenerator, Literal
 from pydantic import BaseModel
 
 from server.config import AgentInfo
+
+DEFAULT_THINK_PROMPT = """\
+あなたは今から「自律思考」を1回実行する。
+
+## 手順
+
+1. 直近10件の会話履歴の要約を読むこと
+2. 要約されていない会話履歴があれば要約を行う
+3. mission.md を読む。なければ思考停止
+4. task.md を読む。なければ mission.md から今やるべき具体的な作業リストを作成する
+5. タスクリストから今やるべきことを1つ選んで実行する
+6. タスクが進捗したら task.md を更新する
+5. 成果物は output/ に .md ファイルとして保存する
+
+## ルール
+
+- 大きなタスクは小さなステップに分解し、1ステップだけ進めること
+- タスクが進捗したら task.md を更新すること
+"""
 
 
 class Message(BaseModel):
@@ -39,6 +61,69 @@ class ThinkResult:
 
 
 class Runner:
+    def __init__(self, config_manager=None):
+        """Runnerを初期化する"""
+        self._config_manager = config_manager
+
+    async def think(self, agent_id: str) -> ThinkResult:
+        """指定エージェントの自律思考を1回実行する（trigger用）"""
+        if not self._config_manager:
+            return ThinkResult(
+                agent_id=agent_id,
+                response="ConfigManager not available",
+                log_path=None,
+                success=False,
+                error="ConfigManager not initialized"
+            )
+
+        try:
+            # AgentInfoを取得
+            agent_info = self._config_manager.get_agent(agent_id)
+            agent_dir = Path(self._config_manager._agents_dir) / agent_id
+
+            # think_streamを実行して結果を収集
+            response = ""
+            log_path = None
+
+            async for event in self.think_stream(agent_info, agent_dir):
+                if event.get("type") == "result":
+                    response = event.get("content", "")
+                    log_path = event.get("log_path")
+                    return ThinkResult(
+                        agent_id=agent_id,
+                        response=response,
+                        log_path=log_path,
+                        success=event.get("success", True),
+                        error=None
+                    )
+                elif event.get("type") == "error":
+                    return ThinkResult(
+                        agent_id=agent_id,
+                        response=response,
+                        log_path=event.get("log_path"),
+                        success=False,
+                        error=event.get("content", "Unknown error")
+                    )
+
+            # 正常完了したが結果イベントがない場合
+            return ThinkResult(
+                agent_id=agent_id,
+                response=response,
+                log_path=log_path,
+                success=True,
+                error=None
+            )
+
+        except Exception as e:
+            error_msg = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+            return ThinkResult(
+                agent_id=agent_id,
+                response="",
+                log_path=None,
+                success=False,
+                error=error_msg
+            )
+
     def build_messages(self, agent_info: AgentInfo, messages: list[Message]) -> list[dict]:
         """LLMに送るメッセージ配列を組み立てる"""
         built = []
@@ -74,9 +159,232 @@ class Runner:
                 cmd.extend(["--system-prompt", agent_info.system_prompt])
         return cmd
 
+    def _agent_cwd(self, agent_info: AgentInfo) -> Path:
+        """エージェントのディレクトリパスを返す"""
+        return Path(__file__).resolve().parent.parent.parent.parent / "agent" / agent_info.agent_id
+
+    # ============================================================
+    # ストリーミング基盤（chat / think 共通）
+    # ============================================================
+
+    async def _run_claude_stream(
+        self, agent_info: AgentInfo, prompt: str,
+        session_id: str | None = None, no_sync: bool = False,
+    ) -> AsyncGenerator[dict, None]:
+        """claude -p をストリーミング実行。stdoutの各JSON行をyieldする。
+        Windows互換のためsubprocess.Popen + スレッドで実装。"""
+        cmd = self._build_cmd(agent_info, session_id)
+        cwd = self._agent_cwd(agent_info)
+
+        env = {**os.environ}
+        if no_sync:
+            env["KOBITO_NO_SYNC"] = "1"
+
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=cwd,
+            env=env,
+        )
+
+        proc.stdin.write(prompt.encode("utf-8"))
+        proc.stdin.close()
+
+        queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        non_json_lines: list[str] = []
+
+        def _read_stdout():
+            for raw_line in proc.stdout:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    loop.call_soon_threadsafe(queue.put_nowait, data)
+                except json.JSONDecodeError:
+                    non_json_lines.append(line)
+            proc.wait()
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        reader = threading.Thread(target=_read_stdout, daemon=True)
+        reader.start()
+
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield event
+
+        reader.join()
+
+        if proc.returncode != 0:
+            stderr_text = proc.stderr.read().decode("utf-8", errors="replace").strip()
+            stdout_errors = "\n".join(non_json_lines)
+            details = stderr_text or stdout_errors or "(出力なし)"
+            raise RuntimeError(f"claude -p 失敗 (rc={proc.returncode}): {details}")
+
+    # ============================================================
+    # チャット用ストリーミング
+    # ============================================================
+
+    async def run_stream(
+        self, agent_info: AgentInfo, messages: list[Message], session_id: str | None = None
+    ) -> AsyncGenerator[str | RunResult, None]:
+        """ストリーミング呼び出し。テキストチャンクをyieldし、最後にRunResultをyieldする"""
+        if not messages:
+            raise ValueError("メッセージリストが空です")
+
+        prompt = messages[-1].content
+        accumulated_text = ""
+        result_session_id = ""
+        prev_text = ""
+
+        async for event in self._run_claude_stream(agent_info, prompt, session_id, no_sync=True):
+            if event.get("type") == "assistant":
+                for item in event.get("message", {}).get("content", []):
+                    if item.get("type") == "text":
+                        text = item["text"]
+                        if len(text) > len(prev_text):
+                            delta = text[len(prev_text):]
+                            prev_text = text
+                            accumulated_text = text
+                            # チャンク分割で滑らかにストリーミング
+                            chunk_size = 30
+                            for i in range(0, len(delta), chunk_size):
+                                yield delta[i:i + chunk_size]
+                                await asyncio.sleep(0.01)
+
+            elif event.get("type") == "result":
+                result_session_id = event.get("session_id", "")
+                result_text = event.get("result", "") or accumulated_text
+                if len(result_text) > len(prev_text):
+                    delta = result_text[len(prev_text):]
+                    chunk_size = 30
+                    for i in range(0, len(delta), chunk_size):
+                        yield delta[i:i + chunk_size]
+                        await asyncio.sleep(0.01)
+                accumulated_text = result_text
+
+        yield RunResult(text=accumulated_text, session_id=result_session_id)
+
+    # ============================================================
+    # 思考用ストリーミング
+    # ============================================================
+
+    async def think_stream(
+        self, agent_info: AgentInfo, agent_dir: Path,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[dict, None]:
+        """自律思考をストリーミング実行。進捗イベントをyieldする"""
+        if session_id:
+            prompt = (
+                "前回の続きを1ステップだけ進めろ。\n"
+                "タスクが進捗したら task.md を更新すること。"
+            )
+        else:
+            prompt = agent_info.think_prompt or DEFAULT_THINK_PROMPT
+        accumulated_text = ""
+        final_report = ""
+        prev_text = ""
+        events_log: list[dict] = []
+        result_session_id = ""
+
+        # プロンプトをフロントに通知
+        yield {"type": "prompt", "content": prompt}
+
+        try:
+            async for event in self._run_claude_stream(
+                agent_info, prompt, session_id=session_id, no_sync=True,
+            ):
+                if event.get("type") == "assistant":
+                    content_items = event.get("message", {}).get("content", [])
+                    has_tool_use = any(
+                        item.get("type") == "tool_use" for item in content_items
+                    )
+
+                    for item in content_items:
+                        if item.get("type") == "text":
+                            text = item["text"]
+                            if text != prev_text:
+                                prev_text = text
+                                accumulated_text = text
+                                ev = {"type": "text", "content": text}
+                                events_log.append(ev)
+                                yield ev
+                        elif item.get("type") == "tool_use":
+                            name = item.get("name", "")
+                            inp = item.get("input", {})
+                            desc = name
+                            if "file_path" in inp:
+                                desc += f": {Path(inp['file_path']).name}"
+                            elif "command" in inp:
+                                desc += f": {inp['command'][:80]}"
+                            elif "pattern" in inp:
+                                desc += f": {inp['pattern']}"
+                            ev = {"type": "tool_use", "content": desc}
+                            events_log.append(ev)
+                            yield ev
+
+                elif event.get("type") == "result":
+                    result_session_id = event.get("session_id", "")
+
+            # session_idをファイルに保存
+            if result_session_id:
+                session_file = agent_dir / ".think_session_id"
+                session_file.write_text(result_session_id, encoding="utf-8")
+
+            # 同じセッションに「まとめろ」と投げて報告を得る
+            summary_prompt = (
+                "今回の作業で何をしたか、以下の形式でまとめろ。ツールは使うな。\n\n"
+                "## 報告\n- （やったことを完了形で）\n\n"
+                "## 変更ファイル\n- （変更したファイル名）\n\n"
+                "## 次回\n- （次にやるべきこと）"
+            )
+            report = ""
+            if result_session_id:
+                async for ev in self._run_claude_stream(
+                    agent_info, summary_prompt, session_id=result_session_id, no_sync=True,
+                ):
+                    if ev.get("type") == "assistant":
+                        for item in ev.get("message", {}).get("content", []):
+                            if item.get("type") == "text":
+                                report = item["text"]
+                    elif ev.get("type") == "result":
+                        report = ev.get("result", "") or report
+
+            log_path = self._save_log(agent_dir, {
+                "agent_id": agent_info.agent_id,
+                "prompt": prompt,
+                "response": report,
+                "events": events_log,
+                "session_id": result_session_id,
+                "success": True,
+                "error": None,
+            })
+            yield {"type": "result", "content": report, "log_path": log_path, "success": True}
+
+        except Exception as e:
+            error_msg = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+            log_path = self._save_log(agent_dir, {
+                "agent_id": agent_info.agent_id,
+                "prompt": prompt,
+                "response": accumulated_text,
+                "events": events_log,
+                "session_id": result_session_id,
+                "success": False,
+                "error": error_msg,
+            })
+            yield {"type": "error", "content": error_msg, "log_path": log_path, "success": False}
+
+    # ============================================================
+    # 非ストリーミング（要約など）
+    # ============================================================
+
     def _run_claude_sync(self, cmd: list[str], prompt: str, cwd: Path | None = None, env: dict | None = None) -> str:
         """claude -p を同期的に実行してstdoutを返す。プロンプトはstdinで渡す"""
-        import os
         run_env = None
         if env:
             run_env = {**os.environ, **env}
@@ -94,10 +402,9 @@ class Runner:
         return result.stdout.decode("utf-8", errors="replace")
 
     async def _run_claude(self, agent_info: AgentInfo, prompt: str, session_id: str | None = None, no_sync: bool = False) -> str:
-        """claude -p を非同期で実行し、stdoutを返す。cwdはエージェントのディレクトリ"""
+        """claude -p を非同期で実行し、stdoutを返す（非ストリーミング）"""
         cmd = self._build_cmd(agent_info, session_id)
-        # project/agent_manager/server/runner.py → リポジトリルート/agent/
-        cwd = Path(__file__).resolve().parent.parent.parent.parent / "agent" / agent_info.agent_id
+        cwd = self._agent_cwd(agent_info)
         env = {"KOBITO_NO_SYNC": "1"} if no_sync else None
         return await asyncio.to_thread(self._run_claude_sync, cmd, prompt, cwd, env)
 
@@ -105,6 +412,7 @@ class Runner:
         """stream-json出力からresultテキストとsession_idを抽出する"""
         result_text = None
         session_id = None
+        accumulated_text = ""
 
         for line in stdout.strip().split("\n"):
             try:
@@ -112,8 +420,13 @@ class Runner:
             except json.JSONDecodeError:
                 continue
 
+            if data.get("type") == "assistant":
+                for item in data.get("message", {}).get("content", []):
+                    if item.get("type") == "text":
+                        accumulated_text = item["text"]
+
             if data.get("type") == "result":
-                result_text = data.get("result", "")
+                result_text = data.get("result", "") or accumulated_text
                 session_id = data.get("session_id", "")
 
         if result_text is None:
@@ -130,119 +443,38 @@ class Runner:
         stdout = await self._run_claude(agent_info, prompt, session_id, no_sync=True)
         return self._parse_result(stdout)
 
-    async def run_stream(
-        self, agent_info: AgentInfo, messages: list[Message], session_id: str | None = None
-    ) -> AsyncGenerator[str | RunResult, None]:
-        """ストリーミング呼び出し。テキストチャンクをyieldし、最後にRunResultをyieldする"""
-        if not messages:
-            raise ValueError("メッセージリストが空です")
-
-        prompt = messages[-1].content
-        stdout = await self._run_claude(agent_info, prompt, session_id, no_sync=True)
-        run_result = self._parse_result(stdout)
-
-        chunk_size = 50
-        for i in range(0, len(run_result.text), chunk_size):
-            yield run_result.text[i:i + chunk_size]
-
-        # 最後にRunResultをyieldしてsession_idを呼び出し元に伝える
-        yield run_result
-
     # ============================================================
-    # 自律思考（Phase 3）
+    # 要約
     # ============================================================
 
-    async def think(self, agent_info: AgentInfo, agent_dir: Path) -> ThinkResult:
-        """自律思考サイクルを1回実行する。Claude Codeにファイル操作を任せる"""
-        prompt = ""
-        raw_response = ""
-        try:
-            mission = await self._ensure_mission(agent_info, agent_dir)
-            task = await self._ensure_task(agent_info, agent_dir, mission)
-            prompt = self._build_think_prompt(mission, task)
+    async def summarize_text(self, agent_info: AgentInfo, text: str) -> dict:
+        """テキストを要約してtitle/summaryを返す。会話や思考ログの要約に使う"""
 
-            stdout = await self._run_claude(agent_info, prompt, no_sync=True)
-            run_result = self._parse_result(stdout)
-            raw_response = run_result.text
-
-            log_path = self._save_log(agent_dir, {
-                "agent_id": agent_info.agent_id,
-                "prompt": prompt,
-                "response": raw_response,
-                "success": True,
-                "error": None,
-            })
-
-            return ThinkResult(
-                agent_id=agent_info.agent_id,
-                response=raw_response,
-                log_path=log_path,
-                success=True,
-                error=None,
-            )
-        except Exception as e:
-            log_path = self._save_log(agent_dir, {
-                "agent_id": agent_info.agent_id,
-                "prompt": prompt,
-                "response": raw_response,
-                "success": False,
-                "error": str(e),
-            })
-            return ThinkResult(
-                agent_id=agent_info.agent_id,
-                response=raw_response,
-                log_path=log_path,
-                success=False,
-                error=str(e),
-            )
-
-    async def _ensure_mission(self, agent_info: AgentInfo, agent_dir: Path) -> str:
-        """mission.md を読む。なければ生成して保存する。内容を返す"""
-        if agent_info.mission:
-            return agent_info.mission
-
-        # LLMで生成
         prompt = (
-            f"以下のシステムプロンプトに基づいて、このエージェントの目的・方針・継続的な責務を"
-            f"mission.md として書いてください。Markdown形式で簡潔に。\n\n{agent_info.system_prompt}"
+            "以下のテキストに対して、JSON形式で返してください。それ以外のテキストは含めないでください。\n\n"
+            f"{text}\n\n"
+            "titleは「テーマと結論」を30文字以内でまとめてください。\n"
+            "summaryは流れと要点を100文字以内でまとめてください。\n\n"
+            '{"title": "テーマと結論（30文字以内）", "summary": "要約（100文字以内）"}'
         )
-        stdout = await self._run_claude(agent_info, prompt, no_sync=True)
-        result = self._parse_result(stdout)
-        mission = result.text
 
-        (agent_dir / "mission.md").write_text(mission, encoding="utf-8")
-        return mission
-
-    async def _ensure_task(self, agent_info: AgentInfo, agent_dir: Path, mission: str) -> str:
-        """task.md を読む。なければ生成して保存する。内容を返す"""
-        if agent_info.task:
-            return agent_info.task
-
-        # LLMで生成
-        prompt = (
-            f"以下のミッションから、今やるべき具体的な作業リストを task.md として書いてください。"
-            f"チェックリスト形式（- [ ] タスク）で。\n\n{mission}"
+        result = await self.run(
+            agent_info,
+            [Message(role="user", content=prompt)],
         )
-        stdout = await self._run_claude(agent_info, prompt, no_sync=True)
-        result = self._parse_result(stdout)
-        task = result.text
 
-        (agent_dir / "task.md").write_text(task, encoding="utf-8")
-        return task
+        json_match = re.search(r'\{[^}]+\}', result.text)
+        if json_match:
+            parsed = json.loads(json_match.group())
+            return {
+                "title": parsed.get("title", "")[:50],
+                "summary": parsed.get("summary", "")[:200],
+            }
+        return {"title": result.text[:50], "summary": ""}
 
-    def _build_think_prompt(self, mission: str, task: str) -> str:
-        """自律思考用のプロンプトを組み立てる"""
-        return (
-            f"あなたの現在のミッション:\n---\n{mission}\n---\n\n"
-            f"あなたの現在のタスクリスト:\n---\n{task}\n---\n\n"
-            "上記のタスクリストから、今やるべきことを1つ選んで実行してください。\n\n"
-            "ルール:\n"
-            "- 1回の実行で2-3分で終わる範囲に絞ること\n"
-            "- 大きなタスクは小さなステップに分解し、1ステップだけ進めること\n"
-            "- task.md を自分で更新すること（完了タスクにチェック、新規タスク追加）\n"
-            "- 成果物があれば output/ に .md ファイルとして保存し、output/index.md を更新すること\n"
-            "- 最後に、何をやったか簡潔に報告すること"
-        )
+    # ============================================================
+    # ログ保存
+    # ============================================================
 
     def _save_log(self, agent_dir: Path, log_data: dict) -> str:
         """思考ログを保存し、ファイルパスを返す"""

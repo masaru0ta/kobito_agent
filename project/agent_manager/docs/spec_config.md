@@ -26,10 +26,12 @@ agents/
     config.yaml        # エージェント定義
     mission.md         # 目的・方針（任意）
     task.md            # 現在のタスク（任意）
+    think_prompt.md    # 自律思考プロンプト（任意、Web UIから編集可）
+    .think_session_id  # 最後の思考セッションID（自動生成）
     chat_history/      # 会話履歴（chatコンポーネントが管理）
-    output/            # 成果物（Phase 2以降）
+    output/            # 成果物
     memory/            # 記憶（Phase 5以降）
-    log/               # ログ（Phase 2以降）
+    log/               # 思考ログ
 ```
 
 ### 3.2 config.yaml スキーマ
@@ -43,11 +45,23 @@ model: "claude-sonnet-4-20250514"  # litellmが解釈できるモデルID
 description: "システムの設計者であり管理者"  # 一行説明（デフォルト: ""）
 ```
 
-Phase 2以降で `triggers` フィールドを追加予定だが、Phase 1では無視する。
+#### トリガー設定（Phase 4で追加）
+
+```yaml
+trigger:
+  cron: "*/10 * * * *"    # cron式（5フィールド形式）
+  enabled: true            # 有効/無効
+```
+
+`trigger` フィールドがない場合、トリガーは無効として扱う。
 
 ### 3.3 Pydanticモデル
 
 ```python
+class TriggerConfig(BaseModel):
+    cron: str                          # cron式（5フィールド形式）
+    enabled: bool = True               # 有効/無効
+
 class AgentConfig(BaseModel):
     name: str                          # 表示名
     model: str                         # モデルID
@@ -59,6 +73,7 @@ class AgentInfo(BaseModel):
     system_prompt: str                 # CLAUDE.md の内容
     mission: str | None                # mission.md の内容（なければNone）
     task: str | None                   # task.md の内容（なければNone）
+    think_prompt: str | None           # think_prompt.md の内容（なければNone → デフォルト使用）
 ```
 
 ### 3.4 処理ロジック
@@ -75,7 +90,8 @@ class AgentInfo(BaseModel):
 4. `CLAUDE.md` を読み込む（存在しなければ空文字列）
 5. `mission.md` を読み込む（存在しなければNone）
 6. `task.md` を読み込む（存在しなければNone）
-7. `AgentInfo` を返す
+7. `think_prompt.md` を読み込む（存在しなければNone → runner側でデフォルト使用）
+8. `AgentInfo` を返す
 
 #### エラーハンドリング
 - `agents/` ディレクトリが存在しない → 空リストを返す
@@ -153,6 +169,13 @@ class ConfigManager:
 - mission.mdが存在しない場合、missionがNoneになる
 - task.mdが存在する場合、taskに内容が設定される
 - task.mdが存在しない場合、taskがNoneになる
+- think_prompt.mdが存在する場合、think_promptに内容が設定される
+- think_prompt.mdが存在しない場合、think_promptがNoneになる
+
+### トリガー設定
+- config.yamlにtriggerフィールドがある場合、TriggerConfigとして読み込める
+- triggerフィールドがない場合、トリガーは無効として扱われる
+- update_configでtriggerフィールドが保持される（未知フィールドを消さない）
 
 ### エージェント一覧
 - agents/ディレクトリに複数エージェントがある場合、全エージェントが返る

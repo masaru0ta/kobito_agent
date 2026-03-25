@@ -2,14 +2,7 @@
 
 # 必須フィールド
 name: "エデン"
-model: "claude-haiku-4-20251009"
+model: "claude-haiku-4-5-20251001"
 
 # 任意フィールド
 description: "関西弁の女子高生。ユーザー向けインターフェース兼パートナー"
-
-# トリガー設定（Phase 2以降で使用）
-# triggers:
-#   - type: "schedule"
-#     schedule: "*/10 * * * *"  # 10分ごと
-#   - type: "chat"              # ユーザーチャット
-#   - type: "webhook"           # アダムからの呼び出し

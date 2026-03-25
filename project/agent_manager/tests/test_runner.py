@@ -23,6 +23,7 @@ def agent_info():
         system_prompt="あなたはアダム。このシステムの設計者である。",
         mission=None,
         task=None,
+        think_prompt=None,
     )
 
 
@@ -35,6 +36,7 @@ def agent_info_no_prompt():
         system_prompt="",
         mission=None,
         task=None,
+        think_prompt=None,
     )
 
 
@@ -208,7 +210,11 @@ class TestRunStreaming:
         """run_streamがテキストチャンクの後にRunResultをyieldする"""
         messages = [Message(role="user", content="こんにちは")]
 
-        with patch("subprocess.run", side_effect=_mock_subprocess_run("こんにちは")):
+        async def mock_stream(*args, **kwargs):
+            yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "こんにちは"}]}}
+            yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
+
+        with patch.object(runner, "_run_claude_stream", mock_stream):
             items = []
             async for item in runner.run_stream(agent_info, messages):
                 items.append(item)
@@ -226,7 +232,11 @@ class TestRunStreaming:
         """全チャンクを結合すると完全な応答テキストになる"""
         messages = [Message(role="user", content="テスト")]
 
-        with patch("subprocess.run", side_effect=_mock_subprocess_run("テスト応答です。")):
+        async def mock_stream(*args, **kwargs):
+            yield {"type": "assistant", "message": {"content": [{"type": "text", "text": "テスト応答です。"}]}}
+            yield {"type": "result", "result": "", "session_id": TEST_SESSION_ID}
+
+        with patch.object(runner, "_run_claude_stream", mock_stream):
             full = ""
             async for item in runner.run_stream(agent_info, messages):
                 if isinstance(item, str):

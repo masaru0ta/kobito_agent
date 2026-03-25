@@ -84,6 +84,18 @@ class Runner:
         """ストリーミング呼び出し。テキストチャンクをyieldする"""
 ```
 
+```python
+    async def summarize_text(
+        self,
+        agent_info: AgentInfo,
+        text: str,
+    ) -> dict:
+        """テキストを要約してtitle/summaryを返す。
+        会話や思考ログなど、任意のテキストの要約に再利用できる。
+        戻り値: {"title": "テーマと結論（30文字以内）", "summary": "要約（100文字以内）"}
+        """
+```
+
 #### Message型
 
 ```python
@@ -141,173 +153,146 @@ class Message(BaseModel):
 
 ## 8. 概要
 
-エージェントが自分で考え、1ステップだけ作業を進める機能。`Runner.think()` メソッドとして追加する。
+エージェントが自分で考え、1ステップだけ作業を進める機能。`Runner.think_stream()` メソッドで実装。
 
-10分に1回、定期トリガー（`spec_trigger.md` 参照）から呼び出される。1回の実行は2-3分で終わる短いタスクを1ステップだけ進める。
+Claude Code（`claude -p`）にファイル操作を含む全作業を委ね、runner側はプロンプト送信・ストリーミング中継・ログ保存のみ行う。
 
 ## 9. 処理フロー
 
-```
-1. mission.md を読む（なければ CLAUDE.md から生成）
-2. task.md を読む（なければ mission.md から生成）
-3. 自律思考プロンプトを組み立てる
-4. claude -p を実行（タイムアウト: 180秒）
-5. 結果を解析する
-6. task.md を更新する（進捗を反映）
-7. 成果物があれば output/ に保存し、index.md を更新する
-8. 思考ログを log/ に保存する
-```
-
-### 9.1 mission.md の読み込み・生成
-
-- `agents/{name}/mission.md` を読む
-- ファイルが存在しない場合、LLMに生成させる:
-  - CLAUDE.md の内容を渡し「このエージェントの目的・方針・継続的な責務を mission.md として書け」と指示
-  - 生成結果を `agents/{name}/mission.md` に保存
-- これは通常の `Runner.run()` を使って行う（自律思考の前段階）
-
-### 9.2 task.md の読み込み・生成
-
-- `agents/{name}/task.md` を読む
-- ファイルが存在しない場合、LLMに生成させる:
-  - mission.md の内容を渡し「このミッションから、今やるべき具体的な作業リストを task.md として書け」と指示
-  - 生成結果を `agents/{name}/task.md` に保存
-
-### 9.3 自律思考プロンプトの組み立て
-
-以下の情報をLLMに渡す:
-
-- **システムプロンプト**: CLAUDE.md（`--system-prompt` で渡す）
-- **ユーザープロンプト**: 下記テンプレートを `stdin` で渡す
+### 9.1 作業フェーズ
 
 ```
-あなたの現在のミッション:
----
-{mission.md の内容}
----
+1. 思考プロンプトを決定する（think_prompt.md or デフォルト / 続行時は専用プロンプト）
+2. プロンプトイベントをフロントに通知する
+3. claude -p をストリーミング実行する（cwdはエージェントディレクトリ）
+4. stdout の各JSON行をリアルタイムにパースし、SSEイベントとしてフロントに中継する
+5. session_id を .think_session_id に保存する
+```
 
-あなたの現在のタスクリスト:
----
-{task.md の内容}
----
+### 9.2 報告フェーズ
 
-上記のタスクリストから、今やるべきことを1つ選んで実行してください。
+作業完了後、同じセッションに報告用プロンプトを投げる:
 
-ルール:
-- 1回の実行で2-3分で終わる範囲に絞ること
+```
+今回の作業で何をしたか、以下の形式でまとめろ。ツールは使うな。
+
+## 報告
+- （やったことを完了形で）
+
+## 変更ファイル
+- （変更したファイル名）
+
+## 次回
+- （次にやるべきこと）
+```
+
+この2フェーズ分離により、作業中の中間テキスト（「〜します」）ではなく、完了形の報告が結果として保存される。
+
+### 9.3 思考プロンプト
+
+#### 新規思考
+
+`agents/{name}/think_prompt.md` の内容を使う。ファイルがなければ `DEFAULT_THINK_PROMPT` を使う。
+
+デフォルトプロンプト:
+```
+あなたは今から「自律思考」を1回実行する。
+
+## 手順
+1. 直近10件の会話履歴の要約を読むこと
+2. 要約されていない会話履歴があれば要約を行う
+3. mission.md を読む。なければ思考停止
+4. task.md を読む。なければ mission.md から今やるべき具体的な作業リストを作成する
+5. タスクリストから今やるべきことを1つ選んで実行する
+6. タスクが進捗したら task.md を更新する
+5. 成果物は output/ に .md ファイルとして保存する
+
+## ルール
 - 大きなタスクは小さなステップに分解し、1ステップだけ進めること
-- 完了したタスクにはチェックを入れ、新たに必要になったタスクは追加すること
-
-実行結果を以下のJSON形式で返してください（JSON以外のテキストを含めないこと）:
-
-{
-  "action": "実行した内容の要約（1行）",
-  "result": "実行結果の詳細",
-  "task_update": "更新後のtask.md全文（進捗を反映）",
-  "output": {
-    "filename": "成果物のファイル名（.md）。なければnull",
-    "content": "成果物の内容。なければnull"
-  }
-}
+- タスクが進捗したら task.md を更新すること
 ```
 
-### 9.4 claude -p の実行
+- Web UIの「プロンプト」ボタンから編集可能
+- `GET/PUT /api/agents/{agent_id}/think-prompt` で取得・更新
 
-- 既存の `Runner._run_claude()` を使う
-- タイムアウト: 180秒（3分）
-- cwdはエージェントのディレクトリ (`agents/{name}/`)
-- session_id は使わない（毎回新規セッション）
+#### 続行思考
 
-### 9.5 結果の解析
+前回の `session_id` を使って `--resume` で実行する。プロンプトは短い:
 
-- LLMの応答からJSONを抽出する
-  - 応答全体がJSONの場合: そのままパース
-  - markdownコードブロック内にJSONがある場合: コードブロック内を抽出してパース
-- JSONのパースに失敗した場合: エラーとする。フォールバック処理はしない
+```
+前回の続きを1ステップだけ進めろ。
+タスクが進捗したら task.md を更新すること。
+```
 
-### 9.6 task.md の更新
+前回のコンテキストがセッションに残っているため、mission/taskの読み直し指示は不要。
 
-- `task_update` フィールドの内容で `agents/{name}/task.md` を上書きする
-- `task_update` が空・null・存在しない場合は更新しない
+### 9.4 セッション管理
 
-### 9.7 成果物の保存
+- 思考完了時に `session_id` を `agents/{name}/.think_session_id` に保存
+- 続行思考時にこのファイルを読んで `--resume` に渡す
+- 新規思考では新しいセッションが作られる
 
-- `output.filename` と `output.content` が両方存在する場合:
-  - `agents/{name}/output/` ディレクトリを作成（なければ）
-  - `agents/{name}/output/{filename}` に保存
-  - `agents/{name}/output/index.md` を更新（なければ新規作成）
-    - 形式: `- [{filename}](./{filename}) — {actionの要約}`
-    - 既存エントリがあれば上書き、なければ追記
-- 成果物がない場合はスキップ
+### 9.5 ストリーミング基盤
 
-### 9.8 思考ログの保存
+`_run_claude_stream()` — `subprocess.Popen` + スレッドでstdoutを行単位にリアルタイム読み取り。Windows互換。
 
-- `agents/{name}/log/` ディレクトリに保存（なければ作成）
+- stdinにプロンプトを書き込んでclose
+- 別スレッドでstdoutを行単位に読み、JSON行をasyncio.Queueに投入
+- メインスレッドでQueueから読んでyield
+- 非JSON行はエラー情報として蓄積（プロセス失敗時にエラーメッセージに含める）
+
+チャットの `run_stream()` も同じ基盤を使う。テキストは30文字ずつチャンク分割して疑似ストリーミング。
+
+### 9.6 思考ログの保存
+
+- `agents/{name}/log/` ディレクトリに保存
 - ファイル名: `{YYYYMMDD_HHMMSS}.json`（UTCタイムスタンプ）
-- 内容:
 
 ```json
 {
   "timestamp": "ISO8601",
   "agent_id": "エージェントID",
-  "action": "実行した内容の要約",
-  "result": "実行結果の詳細",
-  "prompt": "LLMに送ったプロンプト（デバッグ用）",
-  "raw_response": "LLMの生の応答",
+  "prompt": "LLMに送ったプロンプト",
+  "response": "報告フェーズの応答テキスト",
+  "events": [
+    {"type": "tool_use", "content": "Read: mission.md"},
+    {"type": "text", "content": "タスクを確認する"},
+    {"type": "tool_use", "content": "Edit: task.md"}
+  ],
+  "session_id": "claude session id",
   "success": true,
   "error": null
 }
 ```
 
-エラー時:
-```json
-{
-  "timestamp": "ISO8601",
-  "agent_id": "エージェントID",
-  "action": "",
-  "result": "",
-  "prompt": "LLMに送ったプロンプト",
-  "raw_response": "LLMの生の応答",
-  "success": false,
-  "error": "エラーメッセージ"
-}
-```
+`events` 配列にストリーミング中の全イベント（ツール使用、テキスト）を保存する。思考履歴からログを開いたとき、実行過程を再現表示できる。
 
-## 10. 公開インターフェース（Phase 3追加分）
+## 10. 公開インターフェース（Phase 3）
 
 ```python
-@dataclass
-class ThinkResult:
-    """自律思考の結果"""
-    agent_id: str
-    action: str          # 実行した内容の要約
-    result: str          # 実行結果の詳細
-    task_updated: bool   # task.md を更新したか
-    output_saved: bool   # 成果物を保存したか
-    log_path: str        # ログファイルのパス
-    success: bool        # 成功したか
-    error: str | None    # エラーメッセージ（あれば）
-
 class Runner:
-    async def think(self, agent_info: AgentInfo) -> ThinkResult:
-        """自律思考サイクルを1回実行する"""
+    async def think_stream(
+        self, agent_info: AgentInfo, agent_dir: Path,
+        session_id: str | None = None,
+    ) -> AsyncGenerator[dict, None]:
+        """自律思考をストリーミング実行。以下のイベントをyieldする:
+        - {"type": "prompt", "content": "送信プロンプト"}
+        - {"type": "text", "content": "テキストデルタ"}
+        - {"type": "tool_use", "content": "Read: mission.md"}
+        - {"type": "result", "content": "報告テキスト", "log_path": "...", "success": true}
+        - {"type": "error", "content": "エラーメッセージ", "log_path": "...", "success": false}
+        """
 
-    async def _ensure_mission(self, agent_info: AgentInfo) -> str:
-        """mission.md を読む。なければ生成して保存する。内容を返す"""
+    async def think(self, agent_id: str) -> ThinkResult:
+        """トリガー用の非ストリーミング呼び出し。think_streamを内部で実行する"""
 
-    async def _ensure_task(self, agent_info: AgentInfo, mission: str) -> str:
-        """task.md を読む。なければ生成して保存する。内容を返す"""
+    async def _run_claude_stream(
+        self, agent_info: AgentInfo, prompt: str,
+        session_id: str | None = None, no_sync: bool = False,
+    ) -> AsyncGenerator[dict, None]:
+        """claude -p をストリーミング実行。stdoutの各JSON行をyieldする"""
 
-    def _build_think_prompt(self, mission: str, task: str) -> str:
-        """自律思考用のプロンプトを組み立てる"""
-
-    def _parse_think_response(self, raw: str) -> dict:
-        """LLM応答からJSONを抽出してパースする"""
-
-    def _save_output(self, agent_info: AgentInfo, filename: str, content: str, action: str) -> None:
-        """成果物を保存し、index.md を更新する"""
-
-    def _save_log(self, agent_id: str, log_data: dict) -> str:
+    def _save_log(self, agent_dir: Path, log_data: dict) -> str:
         """思考ログを保存し、ファイルパスを返す"""
 ```
 
@@ -315,57 +300,46 @@ class Runner:
 
 ### POST /api/agents/{agent_id}/think
 
-手動で自律思考を1回トリガーする（デバッグ・テスト用）。
+自律思考を実行する。SSEストリーミングレスポンスを返す。
 
-**レスポンス** (200):
-```json
-{
-  "agent_id": "adam",
-  "action": "実行した内容の要約",
-  "result": "実行結果の詳細",
-  "task_updated": true,
-  "output_saved": false,
-  "log_path": "log/20260325_120000.json",
-  "success": true,
-  "error": null
-}
+**クエリパラメータ**:
+- `resume` (bool, optional): `true` で前回セッションを続行
+
+**レスポンス**: SSE (text/event-stream)
+
+```
+event: prompt
+data: 思考プロンプトの内容
+
+event: tool_use
+data: Read: mission.md
+
+event: text
+data: タスクを確認する
+
+event: result
+data: {"type":"result","content":"## 報告\n- ...","log_path":"...","success":true}
 ```
 
-**エラー** (404): エージェントが見つからない
+### GET /api/agents/{agent_id}/think-prompt
+
+思考プロンプトを取得する。`think_prompt.md` がなければデフォルトプロンプトを返す。
+
+### PUT /api/agents/{agent_id}/think-prompt
+
+思考プロンプトを更新する（`think_prompt.md` に保存）。
 
 ### GET /api/agents/{agent_id}/logs
 
 思考ログの一覧を返す（新しい順）。
 
-**レスポンス** (200):
-```json
-[
-  {
-    "filename": "20260325_120000.json",
-    "timestamp": "2026-03-25T12:00:00Z",
-    "action": "実行した内容の要約",
-    "success": true
-  }
-]
-```
-
 ### GET /api/agents/{agent_id}/logs/{filename}
 
-指定した思考ログの詳細を返す。
+思考ログの詳細を返す（events配列を含む）。
 
 ### GET /api/agents/{agent_id}/outputs
 
 成果物ファイルの一覧を返す。
-
-**レスポンス** (200):
-```json
-[
-  {
-    "filename": "report.md",
-    "size": 1234
-  }
-]
-```
 
 ### GET /api/agents/{agent_id}/outputs/{filename}
 
@@ -373,45 +347,39 @@ class Runner:
 
 ## 12. テスト項目（Phase 3）
 
-### mission.md / task.md の管理
-- [ ] mission.md が存在する場合、正しく読み込める
-- [ ] mission.md が存在しない場合、LLMで生成して保存する
-- [ ] task.md が存在する場合、正しく読み込める
-- [ ] task.md が存在しない場合、LLMで生成して保存する
+### 思考プロンプト
+- [ ] think_prompt.md が存在する場合、その内容がプロンプトとして使われる
+- [ ] think_prompt.md が存在しない場合、デフォルトプロンプトが使われる
+- [ ] Web UIからthink_prompt.mdを編集・保存できる
 
-### プロンプト組み立て
-- [ ] 自律思考プロンプトに mission.md の内容が含まれる
-- [ ] 自律思考プロンプトに task.md の内容が含まれる
-- [ ] 自律思考プロンプトに実行ルールとJSON形式の指示が含まれる
+### ストリーミング
+- [ ] think_stream がプロンプトイベントをyieldする
+- [ ] think_stream がテキストイベントをyieldする
+- [ ] think_stream がツール使用イベントをyieldする
+- [ ] think_stream が結果イベント（報告テキスト）をyieldする
+- [ ] エラー時にエラーイベントをyieldする
 
-### 応答の解析
-- [ ] JSON応答を正しくパースできる
-- [ ] markdownコードブロック内のJSONを抽出してパースできる
-- [ ] JSONパース失敗時にエラーとなる（フォールバックしない）
+### セッション管理
+- [ ] 新規思考で新しいセッションが作られる
+- [ ] session_id が .think_session_id に保存される
+- [ ] 続行思考で前回のsession_idが使われる（--resume）
+- [ ] 続行時のプロンプトが短縮版になる
 
-### task.md の更新
-- [ ] task_update がある場合、task.md が上書きされる
-- [ ] task_update が空/nullの場合、task.md は変更されない
-
-### 成果物の保存
-- [ ] output.filename と output.content がある場合、output/ に保存される
-- [ ] output/index.md が正しく更新される（新規作成・既存更新の両方）
-- [ ] 成果物がない場合、output/ は変更されない
+### 報告フェーズ
+- [ ] 作業完了後に報告用プロンプトが同じセッションに送られる
+- [ ] 報告テキストが結果として保存される
 
 ### 思考ログ
 - [ ] ログが log/ に保存される
-- [ ] ログファイル名が YYYYMMDD_HHMMSS.json 形式である
-- [ ] 成功時のログに action, result, prompt, raw_response が含まれる
+- [ ] ログにevents配列が含まれる
+- [ ] ログにsession_idが含まれる
 - [ ] エラー時のログに error が含まれ、success が false である
 
-### think() の統合
-- [ ] think() が正常に ThinkResult を返す
-- [ ] think() でエラーが発生しても ThinkResult を返す（success=false）
-
 ### Web API
-- [ ] POST /api/agents/{agent_id}/think が ThinkResult を返す
+- [ ] POST /api/agents/{agent_id}/think がSSEストリーミングを返す
+- [ ] resume=true で前回セッションを続行できる
+- [ ] GET /api/agents/{agent_id}/think-prompt がプロンプトを返す
+- [ ] PUT /api/agents/{agent_id}/think-prompt がプロンプトを保存する
 - [ ] GET /api/agents/{agent_id}/logs が新しい順でログ一覧を返す
-- [ ] GET /api/agents/{agent_id}/logs/{filename} がログ詳細を返す
-- [ ] GET /api/agents/{agent_id}/outputs が成果物一覧を返す
-- [ ] GET /api/agents/{agent_id}/outputs/{filename} が成果物内容を返す
+- [ ] GET /api/agents/{agent_id}/logs/{filename} がログ詳細（events含む）を返す
 - [ ] 存在しないエージェントに対して404を返す

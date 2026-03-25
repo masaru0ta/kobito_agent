@@ -26,11 +26,16 @@ const API = {
     await fetch(`/api/agents/${agentId}/conversations/${conversationId}`, { method: "DELETE" });
   },
 
-  async updateConfig(agentId, name, model, description) {
-    const resp = await fetch(`/api/agents/${agentId}/config`, {
+  async saveSettings(agentId, { name, model, description, systemPrompt, triggerCron, triggerEnabled }) {
+    const resp = await fetch(`/api/agents/${agentId}/settings`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, model, description }),
+      body: JSON.stringify({
+        name, model, description,
+        system_prompt: systemPrompt,
+        trigger_cron: triggerCron || null,
+        trigger_enabled: triggerEnabled,
+      }),
     });
     if (!resp.ok) {
       const err = await resp.json();
@@ -39,26 +44,98 @@ const API = {
     return resp.json();
   },
 
-  async updateSystemPrompt(agentId, content) {
-    const resp = await fetch(`/api/agents/${agentId}/system-prompt`, {
+
+  async summarizeConversation(agentId, conversationId) {
+    const resp = await fetch(`/api/agents/${agentId}/conversations/${conversationId}/summarize`, {
+      method: "POST",
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || "要約に失敗しました");
+    }
+    return resp.json();
+  },
+
+  async updateMission(agentId, content) {
+    const resp = await fetch(`/api/agents/${agentId}/mission`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content }),
     });
     if (!resp.ok) {
       const err = await resp.json();
-      throw new Error(err.detail || "システムプロンプトの保存に失敗しました");
+      throw new Error(err.detail || "ミッションの保存に失敗しました");
     }
     return resp.json();
   },
 
-  async think(agentId) {
-    const resp = await fetch(`/api/agents/${agentId}/think`, { method: "POST" });
+  async updateTask(agentId, content) {
+    const resp = await fetch(`/api/agents/${agentId}/task`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || "タスクの保存に失敗しました");
+    }
+    return resp.json();
+  },
+
+  async getThinkPrompt(agentId) {
+    const resp = await fetch(`/api/agents/${agentId}/think-prompt`);
+    return resp.json();
+  },
+
+  async updateThinkPrompt(agentId, content) {
+    const resp = await fetch(`/api/agents/${agentId}/think-prompt`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || "思考プロンプトの保存に失敗しました");
+    }
+    return resp.json();
+  },
+
+  async think(agentId, callbacks, { resume = false } = {}) {
+    const url = `/api/agents/${agentId}/think` + (resume ? "?resume=true" : "");
+    const resp = await fetch(url, { method: "POST" });
     if (!resp.ok) {
       const err = await resp.json();
       throw new Error(err.detail || "思考実行に失敗しました");
     }
-    return resp.json();
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+
+      let eventType = null;
+      let dataLines = [];
+      for (const line of lines) {
+        if (line.startsWith("event: ")) {
+          eventType = line.slice(7).trim();
+          dataLines = [];
+        } else if (line.startsWith("data: ")) {
+          dataLines.push(line.slice(6));
+        } else if (line === "" && eventType) {
+          const data = dataLines.join("\n");
+          if (callbacks && callbacks[eventType]) callbacks[eventType](data);
+          eventType = null;
+          dataLines = [];
+        }
+      }
+    }
   },
 
   async getLogs(agentId) {
@@ -80,6 +157,12 @@ const API = {
     const resp = await fetch(`/api/agents/${agentId}/outputs/${filename}`);
     return resp.json();
   },
+
+  async getTriggers() {
+    const resp = await fetch("/api/triggers");
+    return resp.json();
+  },
+
 
   async launchCLI(agentId, sessionId) {
     const resp = await fetch(`/api/agents/${agentId}/launch-cli`, {
@@ -144,4 +227,5 @@ const API = {
       }
     }
   },
+
 };

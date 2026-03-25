@@ -9,51 +9,155 @@
 </head>
 <body>
 
-<!-- サイドバー -->
-<aside class="sidebar">
-  <div class="sidebar-logo">kobito_agent</div>
-
-  <div class="sidebar-section-title">エージェント</div>
+<!-- 左ペイン（エージェント一覧） -->
+<div class="pane-left">
+  <div class="pane-left-logo">kobito_agent</div>
+  <div class="pane-left-section">エージェント</div>
   <ul class="agent-list" id="agent-list"></ul>
+</div>
 
-  <div class="sidebar-section-title">会話履歴</div>
-  <ul class="conversation-list" id="conversation-list"></ul>
-</aside>
+<!-- 中ペイン（タブ + リスト/内容） -->
+<div class="pane-mid">
+  <div class="mid-tabs" id="mid-tabs">
+    <button class="mid-tab active" data-view="chat">チャット</button>
+    <button class="mid-tab" data-view="think">思考</button>
+    <button class="mid-tab" data-view="mission">ミッション</button>
+    <button class="mid-tab" data-view="outputs">成果物</button>
+    <button class="mid-tab" data-view="settings">設定</button>
+  </div>
 
-<!-- メインエリア -->
-<main class="main">
-  <div class="chat-header">
-    <div>
-      <div class="chat-header-name" id="header-name"></div>
-      <div class="chat-header-model" id="header-model"></div>
-      <div class="chat-header-session" id="header-session"></div>
+  <!-- チャット：会話一覧 -->
+  <div class="mid-content active" id="mid-chat">
+    <div class="mid-list-header">
+      <button class="btn-action" id="btn-new-conversation">新規会話</button>
     </div>
-    <div class="header-actions">
-      <button class="btn" id="btn-back-chat" style="display: none;">チャットに戻る</button>
-      <button class="btn btn-settings" id="btn-settings" style="display: none;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-        </svg>
-        設定
-      </button>
-      <button class="btn btn-think" id="btn-think" style="display: none;">思考実行</button>
-      <button class="btn" id="btn-launch-cli">Claude起動</button>
-      <button class="btn" id="btn-new-conversation">新規会話</button>
+    <ul class="mid-list" id="conversation-list"></ul>
+  </div>
+
+  <!-- 思考：実行ボタン + プロンプトボタン + 履歴一覧 -->
+  <div class="mid-content" id="mid-think">
+    <div class="mid-list-header mid-think-header">
+      <button class="btn-think-action" id="btn-think-new">新しく自律思考</button>
+      <button class="btn-think-action btn-think-resume" id="btn-think-resume">続きで自律思考</button>
+      <button class="btn-action btn-think-prompt" id="btn-think-prompt">プロンプト</button>
+    </div>
+    <ul class="mid-list" id="logs-list"></ul>
+  </div>
+
+  <!-- ミッション：表示/編集 -->
+  <div class="mid-content" id="mid-mission">
+    <div class="mid-list-header mid-mission-header">
+      <button class="btn-action" id="btn-talk-mission">ミッションについて話す</button>
+      <button class="btn-action btn-edit-toggle" id="btn-edit-mission">編集</button>
+    </div>
+    <!-- 表示モード -->
+    <div class="mid-direct" id="mission-view">
+      <div class="mid-direct-section">
+        <div class="mid-direct-label">ミッション (mission.md)</div>
+        <div id="mission-content" class="mid-direct-body"></div>
+      </div>
+      <div class="mid-direct-section">
+        <div class="mid-direct-label">タスク (task.md)</div>
+        <div id="task-content" class="mid-direct-body"></div>
+      </div>
+    </div>
+    <!-- 編集モード -->
+    <div class="mid-direct" id="mission-edit" style="display:none;">
+      <div class="mid-direct-section">
+        <div class="mid-direct-label">ミッション (mission.md)</div>
+        <textarea class="mid-form-textarea" id="edit-mission" style="min-height:150px;"></textarea>
+      </div>
+      <div class="mid-direct-section">
+        <div class="mid-direct-label">タスク (task.md)</div>
+        <textarea class="mid-form-textarea" id="edit-task" style="min-height:150px;"></textarea>
+      </div>
+      <div class="mid-form-actions">
+        <button class="btn-reset" id="btn-cancel-mission">キャンセル</button>
+        <button class="btn-save" id="btn-save-mission">保存</button>
+      </div>
     </div>
   </div>
 
-  <!-- タブナビゲーション -->
-  <div class="view-tabs" id="view-tabs">
-    <button class="view-tab active" data-view="chat">チャット</button>
-    <button class="view-tab" data-view="logs">ログ</button>
-    <button class="view-tab" data-view="outputs">成果物</button>
+  <!-- 成果物：ファイル一覧 -->
+  <div class="mid-content" id="mid-outputs">
+    <ul class="mid-list" id="outputs-list"></ul>
   </div>
 
-  <!-- チャット画面 -->
-  <div class="chat-view" id="chat-view">
+  <!-- 設定：直接表示 -->
+  <div class="mid-content" id="mid-settings">
+    <div class="mid-direct">
+      <div class="mid-direct-section">
+        <div class="mid-direct-label">基本設定 (config.yaml)</div>
+        <div class="mid-form-group">
+          <label class="mid-form-label" for="setting-name">名前</label>
+          <input class="mid-form-input" id="setting-name" type="text" placeholder="エージェント名">
+          <div class="form-error" id="error-name">名前は必須です</div>
+        </div>
+        <div class="mid-form-group">
+          <label class="mid-form-label" for="setting-model">モデル</label>
+          <input class="mid-form-input" id="setting-model" type="text" placeholder="モデルID">
+          <div class="mid-form-hint">例: claude-sonnet-4-20250514, claude-haiku-4-5-20251001</div>
+          <div class="form-error" id="error-model">モデルは必須です</div>
+        </div>
+        <div class="mid-form-group">
+          <label class="mid-form-label" for="setting-description">説明</label>
+          <input class="mid-form-input" id="setting-description" type="text" placeholder="一行説明（任意）">
+        </div>
+      </div>
+      <div class="mid-direct-section">
+        <div class="mid-direct-label">トリガー設定</div>
+        <div class="mid-form-group">
+          <label class="mid-form-label">
+            <input type="checkbox" id="setting-trigger-enabled"> 定期トリガーを有効にする
+          </label>
+        </div>
+        <div class="mid-form-group" id="trigger-cron-group">
+          <label class="mid-form-label" for="setting-trigger-cron">cron式</label>
+          <input class="mid-form-input" id="setting-trigger-cron" type="text" placeholder="*/10 * * * *">
+          <div class="mid-form-hint">5フィールド形式（分 時 日 月 曜日）。例: */10 * * * *（10分ごと）, 0 9 * * *（毎日9時）</div>
+          <div class="form-error" id="error-trigger-cron">cron式は必須です</div>
+        </div>
+        <div class="trigger-status" id="trigger-status"></div>
+      </div>
+      <div class="mid-direct-section">
+        <div class="mid-direct-label">システムプロンプト (CLAUDE.md)</div>
+        <div class="mid-form-group">
+          <textarea class="mid-form-textarea" id="setting-system-prompt" placeholder="エージェントの人格を定義するプロンプト..."></textarea>
+          <div class="mid-form-hint">Markdown形式で記述できます</div>
+        </div>
+      </div>
+      <div class="mid-form-actions">
+        <span class="save-feedback" id="save-feedback">保存しました</span>
+        <button class="btn-reset" id="btn-reset">リセット</button>
+        <button class="btn-save" id="btn-save">保存</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- リサイズハンドル -->
+<div class="pane-resize-handle" id="pane-resize-handle"></div>
+
+<!-- 右ペイン（詳細） -->
+<div class="pane-right">
+  <!-- 空状態 -->
+  <div class="right-empty" id="right-empty">選択してください</div>
+
+  <!-- チャット -->
+  <div class="right-content" id="right-chat">
+    <div class="right-chat-header" id="right-chat-header" style="display:none;">
+      <div class="right-chat-header-row">
+        <div id="right-chat-title" class="right-chat-title"></div>
+        <div class="right-chat-actions">
+          <button class="btn-chat-action" id="btn-summarize">要約する</button>
+          <button class="btn-chat-action" id="btn-launch-cli">CLI起動</button>
+          <button class="btn-chat-action btn-danger" id="btn-delete-chat">削除</button>
+        </div>
+      </div>
+      <div id="right-chat-summary" class="right-chat-summary"></div>
+    </div>
     <div class="chat-messages" id="chat-messages"></div>
-
     <div class="chat-input-area">
       <div class="chat-input-wrapper">
         <textarea class="chat-input" id="chat-input" placeholder="メッセージを入力..." rows="1" disabled></textarea>
@@ -63,79 +167,29 @@
     </div>
   </div>
 
-  <!-- ログ画面 -->
-  <div class="logs-view hidden" id="logs-view">
-    <div class="logs-container">
-      <div class="mission-task-section" id="mission-task-section">
-        <div class="mission-section">
-          <div class="section-label">ミッション</div>
-          <div class="section-content" id="mission-content">未設定</div>
-        </div>
-        <div class="task-section">
-          <div class="section-label">タスク</div>
-          <div class="section-content" id="task-content">未設定</div>
-        </div>
-      </div>
-      <div class="logs-list" id="logs-list"></div>
-      <div class="log-detail hidden" id="log-detail">
-        <button class="btn btn-back-logs" id="btn-back-logs">一覧に戻る</button>
-        <div class="log-detail-content" id="log-detail-content"></div>
+  <!-- 思考詳細 -->
+  <div class="right-content" id="right-think-detail"></div>
+
+  <!-- 思考プロンプト編集 -->
+  <div class="right-content" id="right-think-prompt">
+    <div class="right-think-prompt-inner">
+      <div class="mid-direct-label">思考プロンプト (think_prompt.md)</div>
+      <div class="mid-form-hint" style="margin-bottom:10px;">思考実行時にClaude Codeに渡すプロンプト。空にするとデフォルトが使われます</div>
+      <textarea class="mid-form-textarea" id="edit-think-prompt" style="min-height:300px;"></textarea>
+      <div class="mid-form-actions">
+        <span class="save-feedback" id="think-prompt-feedback">保存しました</span>
+        <button class="btn-save" id="btn-save-think-prompt">保存</button>
       </div>
     </div>
   </div>
 
-  <!-- 成果物画面 -->
-  <div class="outputs-view hidden" id="outputs-view">
-    <div class="outputs-container">
-      <div class="outputs-list" id="outputs-list"></div>
-      <div class="output-detail hidden" id="output-detail">
-        <button class="btn btn-back-outputs" id="btn-back-outputs">一覧に戻る</button>
-        <div class="output-detail-content" id="output-detail-content"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 設定画面 -->
-  <div class="settings-view hidden" id="settings-view">
-    <div class="settings-container">
-      <div class="settings-section">
-        <div class="settings-section-title">基本設定</div>
-        <div class="form-group">
-          <label class="form-label" for="setting-name">名前</label>
-          <input class="form-input" id="setting-name" type="text" placeholder="エージェント名">
-          <div class="form-error" id="error-name">名前は必須です</div>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="setting-model">モデル</label>
-          <input class="form-input" id="setting-model" type="text" placeholder="モデルID">
-          <div class="form-hint">例: claude-sonnet-4-20250514, claude-haiku-4-5-20251001</div>
-          <div class="form-error" id="error-model">モデルは必須です</div>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="setting-description">説明</label>
-          <input class="form-input" id="setting-description" type="text" placeholder="一行説明（任意）">
-        </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">システムプロンプト（CLAUDE.md）</div>
-        <div class="form-group">
-          <textarea class="form-textarea" id="setting-system-prompt" placeholder="エージェントの人格を定義するプロンプト..."></textarea>
-          <div class="form-hint">Markdown形式で記述できます</div>
-        </div>
-      </div>
-      <div class="settings-actions">
-        <span class="save-feedback" id="save-feedback">保存しました</span>
-        <button class="btn-reset" id="btn-reset">リセット</button>
-        <button class="btn-save" id="btn-save">保存</button>
-      </div>
-    </div>
-  </div>
-</main>
+  <!-- 成果物プレビュー -->
+  <div class="right-content" id="right-output-detail"></div>
+</div>
 
 <script src="/js/api.js"></script>
 <script src="/js/chat.js"></script>
 <script src="/js/settings.js"></script>
-<script src="/js/think.js"></script>
 <script src="/js/app.js"></script>
 </body>
 </html>
