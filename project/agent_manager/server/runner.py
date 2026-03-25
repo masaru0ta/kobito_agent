@@ -25,22 +25,81 @@ DEFAULT_THINK_PROMPT = """\
 
 1. 直近10件の会話履歴の要約を読むこと
 2. 要約されていない会話履歴があれば要約を行う
-3. mission.md を読む。なければ思考停止
-4. task.md を読む。なければ mission.md から今やるべき具体的な作業リストを作成する
-5. タスクリストから今やるべきことを1つ選んで実行する
-6. タスクが進捗したら task.md を更新する
-5. 成果物は output/ に .md ファイルとして保存する
+3. エージェント間メッセージを確認し、未読メッセージがあれば適切に応答すること
+4. mission.md を読む。なければ思考停止
+5. task.md を読む。なければ mission.md から今やるべき具体的な作業リストを作成する
+6. タスクリストから今やるべきことを1つ選んで実行する
+7. タスクが進捗したら task.md を更新する
+8. 成果物は output/ に .md ファイルとして保存する
 
 ## ルール
 
 - 大きなタスクは小さなステップに分解し、1ステップだけ進めること
 - タスクが進捗したら task.md を更新すること
+- エージェント間メッセージへの応答は、自分のミッションとタスクに関連する場合のみ行うこと
 """
 
 
 class Message(BaseModel):
     role: Literal["user", "assistant"]
     content: str
+    source: str | None = None
+
+
+@dataclass
+class StreamEvent:
+    """stream-json 1行から抽出した情報"""
+    event_type: str  # "assistant", "result", "other"
+    text: str  # assistantイベントのtext内容（累積）
+    tool_uses: list[dict]  # assistantイベントのtool_use一覧
+    session_id: str  # resultイベントのsession_id
+    result_text: str  # resultイベントのresultテキスト
+
+
+def parse_stream_event(event: dict) -> StreamEvent:
+    """claude -p のstream-json 1行をパースする"""
+    etype = event.get("type", "")
+    text = ""
+    tool_uses = []
+    session_id = ""
+    result_text = ""
+
+    if etype == "assistant":
+        for item in event.get("message", {}).get("content", []):
+            if item.get("type") == "text":
+                text = item["text"]
+            elif item.get("type") == "tool_use":
+                tool_uses.append(item)
+    elif etype == "result":
+        session_id = event.get("session_id", "")
+        result_text = event.get("result", "")
+
+    return StreamEvent(
+        event_type=etype,
+        text=text,
+        tool_uses=tool_uses,
+        session_id=session_id,
+        result_text=result_text,
+    )
+
+
+def _describe_tool_use(tool: dict) -> str:
+    """tool_useイベントから簡潔な説明文を作る"""
+    name = tool.get("name", "")
+    inp = tool.get("input", {})
+    if "file_path" in inp:
+        return f"{name}: {Path(inp['file_path']).name}"
+    if "command" in inp:
+        return f"{name}: {inp['command'][:80]}"
+    if "pattern" in inp:
+        return f"{name}: {inp['pattern']}"
+    return name
+
+
+@dataclass
+class ChatToolUse:
+    """チャット中のtool_use通知"""
+    description: str
 
 
 @dataclass
@@ -123,6 +182,15 @@ class Runner:
                 success=False,
                 error=error_msg
             )
+
+    @staticmethod
+    def _build_prompt_with_source(message: Message) -> str:
+        """sourceに応じてプロンプトに送信者情報を付加する"""
+        source = message.source or ""
+        if source.startswith("agent:"):
+            agent_name = source.split(":", 1)[1]
+            return f"AIエージェント {agent_name} からのメッセージです:\n\n{message.content}"
+        return message.content
 
     def build_messages(self, agent_info: AgentInfo, messages: list[Message]) -> list[dict]:
         """LLMに送るメッセージ配列を組み立てる"""
@@ -230,42 +298,43 @@ class Runner:
     # チャット用ストリーミング
     # ============================================================
 
+    async def _yield_text_delta(self, text: str, prev_text: str, chunk_size: int = 30):
+        """テキストの差分をチャンク分割してyieldするヘルパー"""
+        if len(text) > len(prev_text):
+            delta = text[len(prev_text):]
+            for i in range(0, len(delta), chunk_size):
+                yield delta[i:i + chunk_size]
+                await asyncio.sleep(0.01)
+
     async def run_stream(
         self, agent_info: AgentInfo, messages: list[Message], session_id: str | None = None
-    ) -> AsyncGenerator[str | RunResult, None]:
-        """ストリーミング呼び出し。テキストチャンクをyieldし、最後にRunResultをyieldする"""
+    ) -> AsyncGenerator[str | ChatToolUse | RunResult, None]:
+        """ストリーミング呼び出し。テキストチャンク/tool_use通知をyieldし、最後にRunResultをyieldする"""
         if not messages:
             raise ValueError("メッセージリストが空です")
 
-        prompt = messages[-1].content
+        prompt = self._build_prompt_with_source(messages[-1])
         accumulated_text = ""
         result_session_id = ""
         prev_text = ""
 
-        async for event in self._run_claude_stream(agent_info, prompt, session_id, no_sync=True):
-            if event.get("type") == "assistant":
-                for item in event.get("message", {}).get("content", []):
-                    if item.get("type") == "text":
-                        text = item["text"]
-                        if len(text) > len(prev_text):
-                            delta = text[len(prev_text):]
-                            prev_text = text
-                            accumulated_text = text
-                            # チャンク分割で滑らかにストリーミング
-                            chunk_size = 30
-                            for i in range(0, len(delta), chunk_size):
-                                yield delta[i:i + chunk_size]
-                                await asyncio.sleep(0.01)
+        async for raw_event in self._run_claude_stream(agent_info, prompt, session_id, no_sync=True):
+            ev = parse_stream_event(raw_event)
 
-            elif event.get("type") == "result":
-                result_session_id = event.get("session_id", "")
-                result_text = event.get("result", "") or accumulated_text
-                if len(result_text) > len(prev_text):
-                    delta = result_text[len(prev_text):]
-                    chunk_size = 30
-                    for i in range(0, len(delta), chunk_size):
-                        yield delta[i:i + chunk_size]
-                        await asyncio.sleep(0.01)
+            if ev.event_type == "assistant":
+                if ev.text:
+                    async for chunk in self._yield_text_delta(ev.text, prev_text):
+                        yield chunk
+                    prev_text = ev.text
+                    accumulated_text = ev.text
+                for tool in ev.tool_uses:
+                    yield ChatToolUse(description=_describe_tool_use(tool))
+
+            elif ev.event_type == "result":
+                result_session_id = ev.session_id
+                result_text = ev.result_text or accumulated_text
+                async for chunk in self._yield_text_delta(result_text, prev_text):
+                    yield chunk
                 accumulated_text = result_text
 
         yield RunResult(text=accumulated_text, session_id=result_session_id)
@@ -296,40 +365,26 @@ class Runner:
         yield {"type": "prompt", "content": prompt}
 
         try:
-            async for event in self._run_claude_stream(
+            async for raw_event in self._run_claude_stream(
                 agent_info, prompt, session_id=session_id, no_sync=True,
             ):
-                if event.get("type") == "assistant":
-                    content_items = event.get("message", {}).get("content", [])
-                    has_tool_use = any(
-                        item.get("type") == "tool_use" for item in content_items
-                    )
+                ev = parse_stream_event(raw_event)
 
-                    for item in content_items:
-                        if item.get("type") == "text":
-                            text = item["text"]
-                            if text != prev_text:
-                                prev_text = text
-                                accumulated_text = text
-                                ev = {"type": "text", "content": text}
-                                events_log.append(ev)
-                                yield ev
-                        elif item.get("type") == "tool_use":
-                            name = item.get("name", "")
-                            inp = item.get("input", {})
-                            desc = name
-                            if "file_path" in inp:
-                                desc += f": {Path(inp['file_path']).name}"
-                            elif "command" in inp:
-                                desc += f": {inp['command'][:80]}"
-                            elif "pattern" in inp:
-                                desc += f": {inp['pattern']}"
-                            ev = {"type": "tool_use", "content": desc}
-                            events_log.append(ev)
-                            yield ev
+                if ev.event_type == "assistant":
+                    if ev.text and ev.text != prev_text:
+                        prev_text = ev.text
+                        accumulated_text = ev.text
+                        log_ev = {"type": "text", "content": ev.text}
+                        events_log.append(log_ev)
+                        yield log_ev
+                    for tool in ev.tool_uses:
+                        desc = _describe_tool_use(tool)
+                        log_ev = {"type": "tool_use", "content": desc}
+                        events_log.append(log_ev)
+                        yield log_ev
 
-                elif event.get("type") == "result":
-                    result_session_id = event.get("session_id", "")
+                elif ev.event_type == "result":
+                    result_session_id = ev.session_id
 
             # session_idをファイルに保存
             if result_session_id:
@@ -337,23 +392,7 @@ class Runner:
                 session_file.write_text(result_session_id, encoding="utf-8")
 
             # 同じセッションに「まとめろ」と投げて報告を得る
-            summary_prompt = (
-                "今回の作業で何をしたか、以下の形式でまとめろ。ツールは使うな。\n\n"
-                "## 報告\n- （やったことを完了形で）\n\n"
-                "## 変更ファイル\n- （変更したファイル名）\n\n"
-                "## 次回\n- （次にやるべきこと）"
-            )
-            report = ""
-            if result_session_id:
-                async for ev in self._run_claude_stream(
-                    agent_info, summary_prompt, session_id=result_session_id, no_sync=True,
-                ):
-                    if ev.get("type") == "assistant":
-                        for item in ev.get("message", {}).get("content", []):
-                            if item.get("type") == "text":
-                                report = item["text"]
-                    elif ev.get("type") == "result":
-                        report = ev.get("result", "") or report
+            report = await self._collect_text(agent_info, result_session_id)
 
             log_path = self._save_log(agent_dir, {
                 "agent_id": agent_info.agent_id,
@@ -420,26 +459,45 @@ class Runner:
             except json.JSONDecodeError:
                 continue
 
-            if data.get("type") == "assistant":
-                for item in data.get("message", {}).get("content", []):
-                    if item.get("type") == "text":
-                        accumulated_text = item["text"]
-
-            if data.get("type") == "result":
-                result_text = data.get("result", "") or accumulated_text
-                session_id = data.get("session_id", "")
+            ev = parse_stream_event(data)
+            if ev.event_type == "assistant" and ev.text:
+                accumulated_text = ev.text
+            elif ev.event_type == "result":
+                result_text = ev.result_text or accumulated_text
+                session_id = ev.session_id
 
         if result_text is None:
             raise RuntimeError("claude -p から応答を取得できませんでした")
 
         return RunResult(text=result_text, session_id=session_id or "")
 
+    async def _collect_text(self, agent_info: AgentInfo, session_id: str) -> str:
+        """セッション継続でテキストのみ収集する（要約取得用）"""
+        if not session_id:
+            return ""
+        summary_prompt = (
+            "今回の作業で何をしたか、以下の形式でまとめろ。ツールは使うな。\n\n"
+            "## 報告\n- （やったことを完了形で）\n\n"
+            "## 変更ファイル\n- （変更したファイル名）\n\n"
+            "## 次回\n- （次にやるべきこと）"
+        )
+        text = ""
+        async for raw_event in self._run_claude_stream(
+            agent_info, summary_prompt, session_id=session_id, no_sync=True,
+        ):
+            ev = parse_stream_event(raw_event)
+            if ev.event_type == "assistant" and ev.text:
+                text = ev.text
+            elif ev.event_type == "result":
+                text = ev.result_text or text
+        return text
+
     async def run(self, agent_info: AgentInfo, messages: list[Message], session_id: str | None = None) -> RunResult:
         """非ストリーミング呼び出し。RunResult（テキスト+session_id）を返す"""
         if not messages:
             raise ValueError("メッセージリストが空です")
 
-        prompt = messages[-1].content
+        prompt = self._build_prompt_with_source(messages[-1])
         stdout = await self._run_claude(agent_info, prompt, session_id, no_sync=True)
         return self._parse_result(stdout)
 
