@@ -20,3 +20,14 @@ venv/
 
 # clasp
 .clasp.json
+
+# AI generated content and chat history
+chat_history/
+log/
+messages/
+.think_session_id
+*.backup
+chat_history_summary.md
+think_prompt*.md
+think_prompt*.png
+think_streaming.png

@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn>=0.34",
     "pydantic>=2.0",
     "pyyaml>=6.0",
+    "croniter>=2.0",
 ]
 
 [project.optional-dependencies]
