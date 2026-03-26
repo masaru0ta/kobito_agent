@@ -1,6 +1,43 @@
 /**
  * API通信ユーティリティ
  */
+
+/**
+ * SSEストリームを読み取り、イベントごとにコールバックを呼ぶ
+ * @param {Response} resp - fetchのレスポンス
+ * @param {Object} callbacks - イベントタイプ名をキー、ハンドラを値とするオブジェクト
+ */
+async function _readSSE(resp, callbacks) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+
+    let eventType = null;
+    let dataLines = [];
+    for (const line of lines) {
+      if (line.startsWith("event: ")) {
+        eventType = line.slice(7).trim();
+        dataLines = [];
+      } else if (line.startsWith("data: ")) {
+        dataLines.push(line.slice(6));
+      } else if (line === "" && eventType) {
+        const data = dataLines.join("\n");
+        if (callbacks && callbacks[eventType]) callbacks[eventType](data);
+        eventType = null;
+        dataLines = [];
+      }
+    }
+  }
+}
+
 const API = {
   async getAgents() {
     const resp = await fetch("/api/agents");
@@ -107,35 +144,7 @@ const API = {
       const err = await resp.json();
       throw new Error(err.detail || "思考実行に失敗しました");
     }
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop();
-
-      let eventType = null;
-      let dataLines = [];
-      for (const line of lines) {
-        if (line.startsWith("event: ")) {
-          eventType = line.slice(7).trim();
-          dataLines = [];
-        } else if (line.startsWith("data: ")) {
-          dataLines.push(line.slice(6));
-        } else if (line === "" && eventType) {
-          const data = dataLines.join("\n");
-          if (callbacks && callbacks[eventType]) callbacks[eventType](data);
-          eventType = null;
-          dataLines = [];
-        }
-      }
-    }
+    await _readSSE(resp, callbacks);
   },
 
   async getLogs(agentId) {
@@ -175,7 +184,7 @@ const API = {
 
   /**
    * メッセージ送信（SSEストリーミング）
-   * コールバック: onConversationId, onChunk, onDone
+   * コールバック: onConversationId, onChunk, onDone, onError
    */
   async sendMessage(agentId, message, conversationId, callbacks) {
     const resp = await fetch(`/api/agents/${agentId}/chat`, {
@@ -185,42 +194,13 @@ const API = {
     });
 
     try {
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-
-        let eventType = null;
-        let dataLines = [];
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            eventType = line.slice(7).trim();
-            dataLines = [];
-          } else if (line.startsWith("data: ")) {
-            dataLines.push(line.slice(6));
-          } else if (line === "" && eventType) {
-            const data = dataLines.join("\n");
-            if (eventType === "conversation_id" && callbacks.onConversationId) {
-              callbacks.onConversationId(data);
-            } else if (eventType === "chunk" && callbacks.onChunk) {
-              callbacks.onChunk(data);
-            } else if (eventType === "done" && callbacks.onDone) {
-              callbacks.onDone(data);
-            } else if (eventType === "error" && callbacks.onError) {
-              callbacks.onError(data);
-            }
-            eventType = null;
-            dataLines = [];
-          }
-        }
-      }
+      await _readSSE(resp, {
+        conversation_id: (data) => callbacks.onConversationId && callbacks.onConversationId(data),
+        chunk: (data) => callbacks.onChunk && callbacks.onChunk(data),
+        tool_use: (data) => callbacks.onToolUse && callbacks.onToolUse(data),
+        done: (data) => callbacks.onDone && callbacks.onDone(data),
+        error: (data) => callbacks.onError && callbacks.onError(data),
+      });
     } catch (e) {
       if (callbacks.onError) {
         callbacks.onError(e.message || "通信エラーが発生しました");

@@ -18,7 +18,17 @@
   let agents = [];
   let currentAgentId = null;
   let viewingConversationId = null;  // 右ペインに表示中の会話
-  let sendingConversationId = null;  // 送信中の会話（送信完了まで保持、null=送信していない）
+
+  // 送信中の会話（複数同時対応）
+  // Map<pendingId, {agentId, userMessage, agentName, rawText, bubble, convId, finished}>
+  const pendingChats = new Map();
+  let activePendingId = null;  // 右ペインに表示中のpending（null=表示していない）
+  let nextPendingId = 1;
+
+  /** 右ペインに表示中のpendingを返す */
+  function currentPending() {
+    return activePendingId ? pendingChats.get(activePendingId) : null;
+  }
 
   // --- 初期化 ---
   Chat.init(chatMessagesEl);
@@ -39,6 +49,9 @@
   if (agents.length > 0) {
     selectAgent(agents[0].agent_id);
   }
+
+  // --- 定期ポーリング開始 ---
+  startAutoRefresh();
 
   // --- エージェント一覧描画 ---
   function renderAgentList() {
@@ -63,16 +76,98 @@
     }
   }
 
+  // --- 定期ポーリング ---
+  function hasAgentsChanged(oldAgents, newAgents) {
+    if (oldAgents.length !== newAgents.length) {
+      console.log('[Auto Refresh] エージェント数が変更されました');
+      return true;
+    }
+
+    // agent_idでマッピングして比較
+    for (const newAgent of newAgents) {
+      const oldAgent = oldAgents.find(a => a.agent_id === newAgent.agent_id);
+
+      if (!oldAgent) {
+        console.log(`[Auto Refresh] 新しいエージェント発見: ${newAgent.agent_id}`);
+        return true;
+      }
+
+      // mission、task、configの変更をチェック
+      if (oldAgent.mission !== newAgent.mission) {
+        console.log(`[Auto Refresh] ${newAgent.agent_id} の mission が変更されました`);
+        return true;
+      }
+
+      if (oldAgent.task !== newAgent.task) {
+        console.log(`[Auto Refresh] ${newAgent.agent_id} の task が変更されました`);
+        return true;
+      }
+
+      if (JSON.stringify(oldAgent.config) !== JSON.stringify(newAgent.config)) {
+        console.log(`[Auto Refresh] ${newAgent.agent_id} の config が変更されました`);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function startAutoRefresh() {
+    console.log('[Auto Refresh] 定期ポーリング開始 (5秒間隔)');
+    setInterval(async () => {
+      try {
+        console.log('[Auto Refresh] ポーリング実行中...');
+        const latestAgents = await API.getAgents();
+
+        const changed = hasAgentsChanged(agents, latestAgents);
+        console.log(`[Auto Refresh] 変更チェック結果: ${changed}`);
+
+        if (changed) {
+          console.log('[Auto Refresh] エージェント情報が更新されました');
+
+          const previousAgentId = currentAgentId;
+          agents = latestAgents;
+
+          // 現在選択中のエージェントのみ、静かに更新
+          if (previousAgentId && agents.find(a => a.agent_id === previousAgentId)) {
+            const currentAgent = agents.find(a => a.agent_id === previousAgentId);
+
+            // mission/taskのみ更新（スクロール位置を保持）
+            const missionEl = document.getElementById("mission-content");
+            const taskEl = document.getElementById("task-content");
+
+            if (missionEl) {
+              missionEl.innerHTML = currentAgent.mission
+                ? marked.parse(currentAgent.mission)
+                : '<span class="text-muted">未設定</span>';
+            }
+
+            if (taskEl) {
+              taskEl.innerHTML = currentAgent.task
+                ? marked.parse(currentAgent.task)
+                : '<span class="text-muted">未設定</span>';
+            }
+
+            // 設定画面が開いている場合は更新
+            if (typeof Settings !== 'undefined' && Settings.refreshCurrentAgent) {
+              Settings.refreshCurrentAgent(currentAgent);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[Auto Refresh] エラー:', error);
+      }
+    }, 5000); // 5秒間隔
+  }
+
   // --- エージェント選択 ---
   async function selectAgent(agentId) {
-    // 送信中チェック
-    if (pendingChat && !confirm("応答待ちの会話があります。エージェントを切り替えますか？")) return;
     // 設定の未保存チェック
     if (Settings.hasUnsavedChanges && !Settings.confirmDiscard()) return;
 
     currentAgentId = agentId;
     viewingConversationId = null;
-    sendingConversationId = null;
+    activePendingId = null;
 
     // 左ペイン: ハイライト更新
     agentListEl.querySelectorAll(".agent-item").forEach((el) => {
@@ -82,10 +177,6 @@
     const agent = agents.find((a) => a.agent_id === agentId);
     Chat.setAgentName(agent.config.name);
 
-    // チャット入力有効化
-    chatInputEl.disabled = false;
-    updateSendButton();
-
     // 中ペイン: 各タブのデータを読み込み
     await loadConversations();
     loadLogs();
@@ -93,13 +184,32 @@
     loadOutputs();
     Settings.load(agent);
 
-    // 最新の会話を自動で開く
-    const conversations = await API.getConversations(agentId);
-    if (conversations.length > 0) {
-      selectConversation(conversations[0].conversation_id);
+    // このエージェントにストリーミング中のpendingがあれば最初の1つを復元
+    const agentPending = findAgentPending(agentId);
+    if (agentPending) {
+      activePendingId = agentPending.id;
+      restorePendingChat(agentPending.pending);
+      setInputEnabled(false);
     } else {
-      showRightPane("right-empty");
+      chatInputEl.disabled = false;
+      updateSendButton();
+      const conversations = await API.getConversations(agentId);
+      if (conversations.length > 0) {
+        selectConversation(conversations[0].conversation_id);
+      } else {
+        showRightPane("right-empty");
+      }
     }
+  }
+
+  /** 指定エージェントの未完了pendingを1つ探す */
+  function findAgentPending(agentId) {
+    for (const [id, p] of pendingChats) {
+      if (p.agentId === agentId && !p.finished) {
+        return { id, pending: p };
+      }
+    }
+    return null;
   }
 
   // ==============================
@@ -132,7 +242,16 @@
     const conversations = await API.getConversations(currentAgentId);
     conversationListEl.innerHTML = "";
 
-    if (conversations.length === 0) {
+    // このエージェントの未完了pendingを先頭に表示
+    for (const [id, p] of pendingChats) {
+      if (p.agentId === currentAgentId && !p.finished) {
+        const li = createPendingListItem(id, p);
+        if (id === activePendingId) li.classList.add("active");
+        conversationListEl.appendChild(li);
+      }
+    }
+
+    if (conversations.length === 0 && conversationListEl.children.length === 0) {
       conversationListEl.innerHTML = '<li class="empty-state">会話はありません</li>';
       return;
     }
@@ -140,7 +259,7 @@
     for (const conv of conversations) {
       const li = document.createElement("li");
       li.className = "mid-list-item";
-      if (conv.conversation_id === viewingConversationId || conv.conversation_id === sendingConversationId) li.classList.add("active");
+      if (conv.conversation_id === viewingConversationId) li.classList.add("active");
       li.dataset.convId = conv.conversation_id;
 
       const date = document.createElement("div");
@@ -162,11 +281,40 @@
     }
   }
 
-  // 送信中のチャット状態（null=送信していない）
-  let pendingChat = null; // {userMessage, agentName, bubble}
+  /** pendingのリストアイテムを作成する */
+  function createPendingListItem(pendingId, pending) {
+    const li = document.createElement("li");
+    li.className = "mid-list-item";
+    li.dataset.pendingId = pendingId;
+
+    const date = document.createElement("div");
+    date.className = "mid-list-date";
+    date.textContent = "応答中...";
+
+    const preview = document.createElement("div");
+    preview.className = "mid-list-preview";
+    preview.textContent = pending.userMessage.slice(0, 80);
+
+    li.appendChild(date);
+    li.appendChild(preview);
+    li.addEventListener("click", () => {
+      viewingConversationId = null;
+      activePendingId = pendingId;
+      highlightListItem(li);
+      restorePendingChat(pending);
+      setInputEnabled(false);
+    });
+    return li;
+  }
+
+  function highlightListItem(activeLi) {
+    conversationListEl.querySelectorAll(".mid-list-item").forEach((el) => el.classList.remove("active"));
+    if (activeLi) activeLi.classList.add("active");
+  }
 
   async function selectConversation(conversationId) {
     viewingConversationId = conversationId;
+    activePendingId = null;
 
     // 中ペインのハイライト
     conversationListEl.querySelectorAll(".mid-list-item").forEach((el) => {
@@ -184,6 +332,7 @@
     document.getElementById("right-chat-title").textContent = conv.title || formatDate(conv.updated_at) + " の会話";
     document.getElementById("right-chat-summary").textContent = conv.summary || "";
 
+    setInputEnabled(true);
     showRightPane("right-chat");
   }
 
@@ -234,7 +383,9 @@
   // 新規会話
   btnNewConvEl.addEventListener("click", () => {
     viewingConversationId = null;
+    activePendingId = null;
     Chat.clear();
+    setInputEnabled(true);
     chatInputEl.focus();
     document.getElementById("right-chat-header").style.display = "none";
 
@@ -250,7 +401,6 @@
   document.getElementById("btn-talk-mission").addEventListener("click", () => {
     const agent = agents.find((a) => a.agent_id === currentAgentId);
     const hasMission = agent && agent.mission;
-    const hasTask = agent && agent.task;
 
     let message;
     if (hasMission) {
@@ -259,8 +409,9 @@
       message = "まだ mission.md がないので、一緒にミッションを考えよう。CLAUDE.md を読んで、自分の役割からミッションを提案して";
     }
 
-    // 新規会話を開始（中ペインはミッションのまま）
+    // 新規会話を開始
     viewingConversationId = null;
+    activePendingId = null;
     Chat.clear();
     showRightPane("right-chat");
 
@@ -268,96 +419,108 @@
     sendMessage();
   });
 
-  /** 新規会話の仮アイテムを作成して会話リストに追加する */
-  function createPendingConvItem(previewText) {
-    const li = document.createElement("li");
-    li.className = "mid-list-item active";
-
-    const date = document.createElement("div");
-    date.className = "mid-list-date";
-    date.textContent = formatDate(new Date().toISOString());
-
-    const preview = document.createElement("div");
-    preview.className = "mid-list-preview";
-    preview.textContent = previewText.slice(0, 80);
-
-    li.appendChild(date);
-    li.appendChild(preview);
-    li.addEventListener("click", () => {
-      conversationListEl.querySelectorAll(".mid-list-item").forEach((el) => el.classList.remove("active"));
-      li.classList.add("active");
-      if (pendingChat) {
-        restorePendingChat();
-      } else if (li.dataset.convId) {
-        selectConversation(li.dataset.convId);
-      } else {
-        showRightPane("right-chat");
-      }
-    });
-
-    conversationListEl.querySelectorAll(".mid-list-item").forEach((el) => el.classList.remove("active"));
-    conversationListEl.prepend(li);
-    return li;
-  }
-
-  /** pendingChat のデータからチャット画面を再描画する */
-  function restorePendingChat() {
+  /** pending のデータからチャット画面を再描画する */
+  function restorePendingChat(pending) {
     Chat.clear();
-    Chat.addMessage("user", pendingChat.userMessage, "あなた");
-    const newBubble = Chat.addStreamingMessage(pendingChat.agentName);
-    newBubble._rawText = pendingChat.bubble._rawText || "";
-    if (newBubble._rawText) {
-      newBubble.innerHTML = marked.parse(newBubble._rawText);
+    Chat.addMessage("user", pending.userMessage, "あなた");
+    const newBubble = Chat.addStreamingMessage(pending.agentName);
+    newBubble._rawText = pending.rawText;
+    if (pending.rawText) {
+      newBubble.innerHTML = marked.parse(pending.rawText);
     }
-    pendingChat.bubble = newBubble;
+    pending.bubble = newBubble;
     document.getElementById("right-chat-header").style.display = "none";
     showRightPane("right-chat");
   }
 
-  /** 送信完了時の共通クリーンアップ */
-  function finishSending() {
-    if (!viewingConversationId || viewingConversationId === sendingConversationId) {
-      viewingConversationId = sendingConversationId;
+  /** 送信完了時のクリーンアップ */
+  function finishSending(pendingId) {
+    const pending = pendingChats.get(pendingId);
+    if (!pending) return;
+    pending.finished = true;
+    pendingChats.delete(pendingId);
+
+    // 完了したpendingを今見ている場合 → 入力有効化
+    if (activePendingId === pendingId) {
+      activePendingId = null;
+      if (pending.convId) viewingConversationId = pending.convId;
+      setInputEnabled(true);
+      chatInputEl.focus();
     }
-    sendingConversationId = null;
-    pendingChat = null;
-    setInputEnabled(true);
-    chatInputEl.focus();
+
+    // 同じエージェントを見ている場合 → 会話一覧更新
+    if (currentAgentId === pending.agentId) {
+      loadConversations();
+    }
   }
 
   // メッセージ送信
   async function sendMessage() {
     const message = chatInputEl.value.trim();
-    if (!message || pendingChat) return;
+    // activePendingIdがある＝今ストリーミング中の画面を見てるので送信不可
+    if (!message || activePendingId) return;
+
+    const sendAgentId = currentAgentId;
+    const sendConvId = viewingConversationId;
+    const pendingId = nextPendingId++;
 
     chatInputEl.value = "";
     setInputEnabled(false);
-    sendingConversationId = viewingConversationId;
-
-    const pendingConvItem = sendingConversationId ? null : createPendingConvItem(message);
 
     showRightPane("right-chat");
     Chat.addMessage("user", message, "あなた");
-    const agent = agents.find((a) => a.agent_id === currentAgentId);
+    const agent = agents.find((a) => a.agent_id === sendAgentId);
     const bubble = Chat.addStreamingMessage(agent.config.name);
-    pendingChat = { userMessage: message, agentName: agent.config.name, bubble };
 
-    await API.sendMessage(currentAgentId, message, sendingConversationId, {
+    const pending = {
+      agentId: sendAgentId,
+      userMessage: message,
+      agentName: agent.config.name,
+      bubble,
+      rawText: "",
+      convId: sendConvId,
+      finished: false,
+    };
+    pendingChats.set(pendingId, pending);
+    activePendingId = pendingId;
+
+    // 中ペインにpendingアイテムを追加（新規会話の場合）
+    if (!sendConvId) {
+      const li = createPendingListItem(pendingId, pending);
+      li.classList.add("active");
+      conversationListEl.querySelectorAll(".mid-list-item").forEach((el) => el.classList.remove("active"));
+      conversationListEl.prepend(li);
+    }
+
+    await API.sendMessage(sendAgentId, message, sendConvId, {
       onConversationId(id) {
-        sendingConversationId = id;
-        if (pendingConvItem) pendingConvItem.dataset.convId = id;
+        pending.convId = id;
       },
       onChunk(chunk) {
-        Chat.appendChunk(pendingChat.bubble, chunk);
+        pending.rawText += chunk;
+        // 今このpendingを見ている場合のみDOMを更新
+        if (activePendingId === pendingId) {
+          Chat.appendChunk(pending.bubble, chunk);
+        }
+      },
+      onToolUse(description) {
+        pending.lastToolUse = description;
+        if (activePendingId === pendingId) {
+          Chat.showToolUse(pending.bubble, description);
+        }
       },
       async onDone() {
-        Chat.finishStreaming(pendingChat.bubble, pendingChat.bubble._rawText || "");
-        finishSending();
-        await loadConversations();
+        if (activePendingId === pendingId) {
+          Chat.finishStreaming(pending.bubble, pending.rawText);
+        }
+        finishSending(pendingId);
       },
       onError(errorMsg) {
-        Chat.finishStreaming(pendingChat.bubble, "エラー: " + errorMsg);
-        finishSending();
+        pending.rawText += "\n\nエラー: " + errorMsg;
+        if (activePendingId === pendingId) {
+          Chat.finishStreaming(pending.bubble, "エラー: " + errorMsg);
+        }
+        finishSending(pendingId);
       },
     });
   }
@@ -377,7 +540,7 @@
   }
 
   function updateSendButton() {
-    if (pendingChat) return;
+    if (activePendingId) return;
     btnSendEl.disabled = !chatInputEl.value.trim();
   }
 
@@ -468,12 +631,17 @@
 
       const preview = document.createElement("div");
       preview.className = "mid-list-preview";
-      preview.textContent = output.filename;
 
-      const size = document.createElement("span");
-      size.className = "mid-list-size";
-      size.textContent = formatSize(output.size);
-      preview.appendChild(size);
+      const date = document.createElement("span");
+      date.className = "mid-list-date";
+      date.textContent = output.date || "";
+
+      const title = document.createElement("span");
+      title.className = "mid-list-title";
+      title.textContent = output.title || output.filename;
+
+      preview.appendChild(date);
+      preview.appendChild(title);
 
       li.appendChild(preview);
       li.addEventListener("click", () => showOutputDetail(output.filename, li));

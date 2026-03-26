@@ -60,14 +60,19 @@ const Chat = {
     sender.className = "message-sender";
     sender.textContent = senderName || this._currentAgentName;
 
+    const toolStatus = document.createElement("div");
+    toolStatus.className = "message-tool-status";
+
     const bubble = document.createElement("div");
     bubble.className = "message-bubble streaming-cursor";
+    bubble._toolStatusEl = toolStatus;
 
     const time = document.createElement("div");
     time.className = "message-time";
     time.textContent = this._formatTime(new Date());
 
     div.appendChild(sender);
+    div.appendChild(toolStatus);
     div.appendChild(bubble);
     div.appendChild(time);
     this._messagesEl.appendChild(div);
@@ -82,7 +87,21 @@ const Chat = {
   appendChunk(bubble, chunk) {
     bubble._rawText = (bubble._rawText || "") + chunk;
     bubble.innerHTML = marked.parse(bubble._rawText);
+    // テキストが届いたらtool_use表示をクリア
+    if (bubble._toolStatusEl) {
+      bubble._toolStatusEl.textContent = "";
+    }
     this._scrollToBottom();
+  },
+
+  /**
+   * tool_use状況を表示（ストリーミング中）
+   */
+  showToolUse(bubble, description) {
+    if (bubble._toolStatusEl) {
+      bubble._toolStatusEl.textContent = description;
+      this._scrollToBottom();
+    }
   },
 
   /**
@@ -92,6 +111,9 @@ const Chat = {
     bubble.classList.remove("streaming-cursor");
     bubble._rawText = fullText;
     bubble.innerHTML = marked.parse(fullText);
+    if (bubble._toolStatusEl) {
+      bubble._toolStatusEl.textContent = "";
+    }
     this._scrollToBottom();
   },
 
@@ -101,7 +123,13 @@ const Chat = {
   renderHistory(messages, agentName) {
     this.clear();
     for (const msg of messages) {
-      const name = msg.role === "user" ? "あなた" : agentName;
+      let name;
+      if (msg.source && msg.source.startsWith("agent:")) {
+        // エージェント間通信: 送信元エージェント名を表示
+        name = msg.source.replace("agent:", "");
+      } else {
+        name = msg.role === "user" ? "あなた" : agentName;
+      }
       const ts = this._formatTime(new Date(msg.timestamp));
       this.addMessage(msg.role, msg.content, name, ts);
     }

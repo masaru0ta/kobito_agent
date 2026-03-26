@@ -34,6 +34,7 @@ class InterAgentSessionManager:
         self, from_id: str, to_id: str,
         message: str, session_id: str | None = None,
         caller_conversation_id: str | None = None,
+        call_depth: int = 0,
     ) -> CallResult:
         """
         エージェント間セッション呼び出し（同期処理）
@@ -48,7 +49,7 @@ class InterAgentSessionManager:
 
         # Claude Codeセッション実行（session_idがあれば継続）
         response, claude_session_id = await self._execute_claude_session(
-            from_id, to_id, message, session_id
+            from_id, to_id, message, session_id, call_depth
         )
 
         # 呼び出し先のchat_historyに保存（Claude Codeの本物のsession_idを使用）
@@ -74,12 +75,19 @@ class InterAgentSessionManager:
                 raise ValueError(f"エージェント '{agent_id}' が見つかりません")
 
     async def _execute_claude_session(
-        self, from_id: str, to_id: str, message: str, session_id: str | None,
+        self, from_id: str, to_id: str, message: str,
+        session_id: str | None, call_depth: int = 0,
     ) -> tuple[str, str]:
         """Claude Codeセッションを実行して(応答テキスト, session_id)を返す"""
         agent_info = self._config_manager.get_agent(to_id)
         messages = [Message(role="user", content=message, source=f"agent:{from_id}")]
-        result = await self._runner.run(agent_info, messages, session_id=session_id)
+        extra_env = {
+            "KOBITO_CALLER_AGENT_ID": to_id,
+            "KOBITO_CALL_DEPTH": str(call_depth),
+        }
+        result = await self._runner.run(
+            agent_info, messages, session_id=session_id, extra_env=extra_env,
+        )
         return result.text, result.session_id
 
     def _save_chat_history(

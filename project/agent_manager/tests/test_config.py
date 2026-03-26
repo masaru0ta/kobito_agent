@@ -201,3 +201,126 @@ class TestConfigAPI:
         resp = await client.get("/api/agents/nonexistent")
 
         assert resp.status_code == 404
+
+
+# ============================================================
+# triggerセクション
+# ============================================================
+
+
+class TestConfigTrigger:
+    """triggerセクションのテスト（spec_trigger.md準拠）"""
+
+    def test_trigger_section_exists(self, agents_dir):
+        """config.yamlにtriggerセクションがある場合、正しく読み込める"""
+        d = agents_dir / "trigger_agent"
+        d.mkdir()
+        config = {
+            "name": "トリガーエージェント",
+            "model": "claude-sonnet-4-20250514",
+            "description": "定期実行エージェント",
+            "trigger": {
+                "cron": "*/10 * * * *",
+                "enabled": True
+            }
+        }
+        (d / "config.yaml").write_text(yaml.dump(config, allow_unicode=True), encoding="utf-8")
+
+        manager = ConfigManager(agents_dir)
+        agent = manager.get_agent("trigger_agent")
+
+        assert agent.config.trigger is not None
+        assert agent.config.trigger.cron == "*/10 * * * *"
+        assert agent.config.trigger.enabled is True
+
+    def test_trigger_section_missing(self, agents_dir, adam_dir):
+        """triggerセクションが省略された場合、triggerはNoneになる"""
+        manager = ConfigManager(agents_dir)
+        agent = manager.get_agent("adam")
+
+        assert agent.config.trigger is None
+
+    def test_trigger_enabled_defaults_to_true(self, agents_dir):
+        """enabledが省略された場合、デフォルトでTrueになる"""
+        d = agents_dir / "default_enabled"
+        d.mkdir()
+        config = {
+            "name": "デフォルトエージェント",
+            "model": "claude-sonnet-4-20250514",
+            "trigger": {
+                "cron": "0 */1 * * *"
+            }
+        }
+        (d / "config.yaml").write_text(yaml.dump(config, allow_unicode=True), encoding="utf-8")
+
+        manager = ConfigManager(agents_dir)
+        agent = manager.get_agent("default_enabled")
+
+        assert agent.config.trigger is not None
+        assert agent.config.trigger.enabled is True
+
+    def test_trigger_enabled_false(self, agents_dir):
+        """enabled=falseの場合、正しく読み込める"""
+        d = agents_dir / "disabled_trigger"
+        d.mkdir()
+        config = {
+            "name": "無効エージェント",
+            "model": "claude-sonnet-4-20250514",
+            "trigger": {
+                "cron": "0 0 * * *",
+                "enabled": False
+            }
+        }
+        (d / "config.yaml").write_text(yaml.dump(config, allow_unicode=True), encoding="utf-8")
+
+        manager = ConfigManager(agents_dir)
+        agent = manager.get_agent("disabled_trigger")
+
+        assert agent.config.trigger is not None
+        assert agent.config.trigger.enabled is False
+
+    def test_various_cron_expressions(self, agents_dir):
+        """様々なcron式が正しく読み込める"""
+        test_cases = [
+            ("*/10 * * * *", "10分ごと"),
+            ("0 */1 * * *", "毎時0分"),
+            ("0 9 * * *", "毎日9時"),
+            ("0 0 * * 1", "毎週月曜日0時"),
+            ("0 0 1 * *", "毎月1日0時")
+        ]
+
+        for i, (cron_expr, description) in enumerate(test_cases):
+            d = agents_dir / f"cron_test_{i}"
+            d.mkdir()
+            config = {
+                "name": f"テスト{i}",
+                "model": "claude-sonnet-4-20250514",
+                "trigger": {
+                    "cron": cron_expr,
+                    "enabled": True
+                }
+            }
+            (d / "config.yaml").write_text(yaml.dump(config, allow_unicode=True), encoding="utf-8")
+
+            manager = ConfigManager(agents_dir)
+            agent = manager.get_agent(f"cron_test_{i}")
+
+            assert agent.config.trigger is not None
+            assert agent.config.trigger.cron == cron_expr
+
+    def test_trigger_missing_cron_field(self, agents_dir):
+        """triggerセクションにcronフィールドが欠落している場合、バリデーションエラーになる"""
+        d = agents_dir / "no_cron"
+        d.mkdir()
+        config = {
+            "name": "cronなし",
+            "model": "claude-sonnet-4-20250514",
+            "trigger": {
+                "enabled": True
+            }
+        }
+        (d / "config.yaml").write_text(yaml.dump(config, allow_unicode=True), encoding="utf-8")
+
+        manager = ConfigManager(agents_dir)
+        with pytest.raises(Exception):
+            manager.get_agent("no_cron")

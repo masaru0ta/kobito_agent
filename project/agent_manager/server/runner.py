@@ -21,6 +21,13 @@ from server.config import AgentInfo
 DEFAULT_THINK_PROMPT = """\
 あなたは今から「自律思考」を1回実行する。
 
+## 利用可能なツール
+
+- **call_agent(agent_id, message)** — 他のエージェントを呼び出して会話する
+  - agent_id: 呼び出し先（例: adam, eden）
+  - message: 送信するメッセージ
+  - 自分自身は呼び出せない。階層は2レベルまで
+
 ## 手順
 
 1. 直近10件の会話履歴の要約を読むこと
@@ -29,14 +36,16 @@ DEFAULT_THINK_PROMPT = """\
 4. mission.md を読む。なければ思考停止
 5. task.md を読む。なければ mission.md から今やるべき具体的な作業リストを作成する
 6. タスクリストから今やるべきことを1つ選んで実行する
-7. タスクが進捗したら task.md を更新する
-8. 成果物は output/ に .md ファイルとして保存する
+7. 必要に応じて他のエージェントと連携する（call_agentツールを使用）
+8. タスクが進捗したら task.md を更新する
+9. 成果物は output/ に .md ファイルとして保存する
 
 ## ルール
 
 - 大きなタスクは小さなステップに分解し、1ステップだけ進めること
 - タスクが進捗したら task.md を更新すること
 - エージェント間メッセージへの応答は、自分のミッションとタスクに関連する場合のみ行うこと
+- call_agentツールは必要な場合のみ使用し、自律的な判断で呼び出すこと
 """
 
 
@@ -212,7 +221,8 @@ class Runner:
             raise FileNotFoundError("claudeコマンドが見つかりません")
         return path
 
-    def _build_cmd(self, agent_info: AgentInfo, session_id: str | None = None) -> list[str]:
+    def _build_cmd(self, agent_info: AgentInfo, session_id: str | None = None,
+                   call_depth: int = 0) -> list[str]:
         """claude -p コマンドの引数リストを組み立てる（プロンプトはstdinで渡す）"""
         cmd = [
             self._find_claude(), "-p",
@@ -220,12 +230,32 @@ class Runner:
             "--verbose",
             "--model", agent_info.config.model,
         ]
+        # call_agent MCPサーバーを登録（環境変数でagent_idとcall_depthを渡す）
+        mcp_script = self._project_root() / "project" / "agent_manager" / "mcp_call_agent.py"
+        if mcp_script.exists():
+            mcp_json = json.dumps({
+                "mcpServers": {
+                    "call_agent": {
+                        "command": "python",
+                        "args": [str(mcp_script)],
+                        "env": {
+                            "KOBITO_CALLER_AGENT_ID": agent_info.agent_id,
+                            "KOBITO_CALL_DEPTH": str(call_depth),
+                        },
+                    }
+                }
+            })
+            cmd.extend(["--mcp-config", mcp_json])
         if session_id:
             cmd.extend(["--resume", session_id])
         else:
             if agent_info.system_prompt:
                 cmd.extend(["--system-prompt", agent_info.system_prompt])
         return cmd
+
+    def _project_root(self) -> Path:
+        """プロジェクトルートを返す"""
+        return Path(__file__).resolve().parent.parent.parent.parent
 
     def _agent_cwd(self, agent_info: AgentInfo) -> Path:
         """エージェントのディレクトリパスを返す"""
@@ -238,10 +268,12 @@ class Runner:
     async def _run_claude_stream(
         self, agent_info: AgentInfo, prompt: str,
         session_id: str | None = None, no_sync: bool = False,
+        extra_env: dict[str, str] | None = None,
     ) -> AsyncGenerator[dict, None]:
         """claude -p をストリーミング実行。stdoutの各JSON行をyieldする。
         Windows互換のためsubprocess.Popen + スレッドで実装。"""
-        cmd = self._build_cmd(agent_info, session_id)
+        call_depth = int((extra_env or {}).get("KOBITO_CALL_DEPTH", "0"))
+        cmd = self._build_cmd(agent_info, session_id, call_depth=call_depth)
         cwd = self._agent_cwd(agent_info)
 
         env = {**os.environ}
@@ -318,7 +350,10 @@ class Runner:
         result_session_id = ""
         prev_text = ""
 
-        async for raw_event in self._run_claude_stream(agent_info, prompt, session_id, no_sync=True):
+        caller_env = {"KOBITO_CALLER_AGENT_ID": agent_info.agent_id}
+        async for raw_event in self._run_claude_stream(
+            agent_info, prompt, session_id, no_sync=True, extra_env=caller_env,
+        ):
             ev = parse_stream_event(raw_event)
 
             if ev.event_type == "assistant":
@@ -365,8 +400,10 @@ class Runner:
         yield {"type": "prompt", "content": prompt}
 
         try:
+            caller_env = {"KOBITO_CALLER_AGENT_ID": agent_info.agent_id}
             async for raw_event in self._run_claude_stream(
                 agent_info, prompt, session_id=session_id, no_sync=True,
+                extra_env=caller_env,
             ):
                 ev = parse_stream_event(raw_event)
 
@@ -440,12 +477,17 @@ class Runner:
             raise RuntimeError(f"claude -p 失敗: {stderr_text}")
         return result.stdout.decode("utf-8", errors="replace")
 
-    async def _run_claude(self, agent_info: AgentInfo, prompt: str, session_id: str | None = None, no_sync: bool = False) -> str:
+    async def _run_claude(self, agent_info: AgentInfo, prompt: str, session_id: str | None = None,
+                          no_sync: bool = False, extra_env: dict[str, str] | None = None) -> str:
         """claude -p を非同期で実行し、stdoutを返す（非ストリーミング）"""
         cmd = self._build_cmd(agent_info, session_id)
         cwd = self._agent_cwd(agent_info)
-        env = {"KOBITO_NO_SYNC": "1"} if no_sync else None
-        return await asyncio.to_thread(self._run_claude_sync, cmd, prompt, cwd, env)
+        env = {}
+        if no_sync:
+            env["KOBITO_NO_SYNC"] = "1"
+        if extra_env:
+            env.update(extra_env)
+        return await asyncio.to_thread(self._run_claude_sync, cmd, prompt, cwd, env or None)
 
     def _parse_result(self, stdout: str) -> RunResult:
         """stream-json出力からresultテキストとsession_idを抽出する"""
@@ -492,13 +534,14 @@ class Runner:
                 text = ev.result_text or text
         return text
 
-    async def run(self, agent_info: AgentInfo, messages: list[Message], session_id: str | None = None) -> RunResult:
+    async def run(self, agent_info: AgentInfo, messages: list[Message],
+                  session_id: str | None = None, extra_env: dict[str, str] | None = None) -> RunResult:
         """非ストリーミング呼び出し。RunResult（テキスト+session_id）を返す"""
         if not messages:
             raise ValueError("メッセージリストが空です")
 
         prompt = self._build_prompt_with_source(messages[-1])
-        stdout = await self._run_claude(agent_info, prompt, session_id, no_sync=True)
+        stdout = await self._run_claude(agent_info, prompt, session_id, no_sync=True, extra_env=extra_env)
         return self._parse_result(stdout)
 
     # ============================================================

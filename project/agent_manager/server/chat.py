@@ -11,11 +11,11 @@ from typing import AsyncGenerator, Literal
 from pydantic import BaseModel
 
 from server.config import ConfigManager
-from server.runner import Message, Runner, RunResult
+from server.runner import ChatToolUse, Message, Runner, RunResult
 
 
 class ChatEvent(BaseModel):
-    type: Literal["conversation_id", "chunk", "done"]
+    type: Literal["conversation_id", "chunk", "tool_use", "done"]
     data: str
 
 
@@ -23,6 +23,7 @@ class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     timestamp: datetime
+    source: str | None = None
 
 
 class Conversation(BaseModel):
@@ -31,6 +32,8 @@ class Conversation(BaseModel):
     created_at: datetime
     updated_at: datetime
     session_id: str | None = None
+    title: str | None = None
+    summary: str | None = None
     messages: list[ChatMessage]
 
 
@@ -41,6 +44,8 @@ class ConversationSummary(BaseModel):
     updated_at: datetime
     message_count: int
     last_message: str
+    title: str | None = None
+    summary: str | None = None
 
 
 class ConversationNotFoundError(Exception):
@@ -111,6 +116,8 @@ class ChatManager:
         async for item in self._runner.run_stream(agent_info, messages, session_id):
             if isinstance(item, RunResult):
                 run_result = item
+            elif isinstance(item, ChatToolUse):
+                yield ChatEvent(type="tool_use", data=item.description)
             else:
                 full_response += item
                 yield ChatEvent(type="chunk", data=item)
@@ -145,6 +152,8 @@ class ChatManager:
                     updated_at=data["updated_at"],
                     message_count=len(messages),
                     last_message=last_msg[:100],
+                    title=data.get("title"),
+                    summary=data.get("summary"),
                 )
             )
 
@@ -160,11 +169,36 @@ class ChatManager:
             created_at=data["created_at"],
             updated_at=data["updated_at"],
             session_id=data.get("session_id"),
+            title=data.get("title"),
+            summary=data.get("summary"),
             messages=[
-                ChatMessage(role=m["role"], content=m["content"], timestamp=m["timestamp"])
+                ChatMessage(role=m["role"], content=m["content"], timestamp=m["timestamp"],
+                           source=m.get("source"))
                 for m in data["messages"]
             ],
         )
+
+    async def summarize(self, agent_id: str, conversation_id: str, agent_info, runner) -> dict:
+        """会話を要約してtitle/summaryを生成・保存する"""
+        conv_data = self._load_conv(agent_id, conversation_id)
+        messages = conv_data.get("messages", [])
+        if not messages:
+            raise ValueError("メッセージがありません")
+
+        # 会話内容をテキスト化
+        lines = []
+        for m in messages:
+            role = "ユーザー" if m["role"] == "user" else "エージェント"
+            lines.append(f"{role}: {m['content'][:500]}")
+        conversation_text = "\n".join(lines)
+
+        result = await runner.summarize_text(agent_info, conversation_text)
+
+        conv_data["title"] = result["title"]
+        conv_data["summary"] = result["summary"]
+        self._save_conv(conv_data)
+
+        return result
 
     def delete_conversation(self, agent_id: str, conversation_id: str) -> None:
         """会話を削除する"""

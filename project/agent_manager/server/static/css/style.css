@@ -212,6 +212,9 @@ body {
 
 .mid-list-size { font-size: 12px; color: var(--muted); float: right; margin-top: 3px; }
 
+.mid-list-date { font-size: 12px; color: var(--muted); margin-right: 8px; flex-shrink: 0; }
+.mid-list-title { overflow: hidden; text-overflow: ellipsis; }
+
 .empty-state {
   text-align: center;
   color: var(--muted);
@@ -499,6 +502,18 @@ body {
 @keyframes blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }
+}
+
+/* ツール実行状況 */
+.message-tool-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 0 0 4px 0;
+  min-height: 0;
+  transition: opacity 0.2s;
+}
+.message-tool-status:empty {
+  display: none;
 }
 
 /* 入力エリア */

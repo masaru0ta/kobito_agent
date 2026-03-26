@@ -51,70 +51,45 @@ class ConfigManager:
             raise AgentNotFoundError(f"エージェント '{agent_id}' が見つかりません")
         return agent_dir
 
+    def _read_config(self, agent_id: str) -> tuple[Path, dict]:
+        """config.yamlを読み込み、(パス, 辞書)を返す"""
+        agent_dir = self._ensure_agent_dir(agent_id)
+        config_path = agent_dir / "config.yaml"
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        return config_path, raw
+
+    def _write_config(self, config_path: Path, raw: dict) -> AgentConfig:
+        """config.yamlを書き戻し、AgentConfigを返す"""
+        config_path.write_text(yaml.dump(raw, allow_unicode=True), encoding="utf-8")
+        return AgentConfig(**raw)
+
     def update_config(self, agent_id: str, name: str, model: str, description: str) -> AgentConfig:
-        """config.yaml を更新する。未知フィールドを保持してマージする。更新後の AgentConfig を返す"""
+        """config.yaml を更新する。未知フィールドを保持してマージする"""
         if not name:
             raise ValueError("名前は必須です")
         if not model:
             raise ValueError("モデルは必須です")
 
-        agent_dir = self._ensure_agent_dir(agent_id)
-        config_path = agent_dir / "config.yaml"
-
-        # 既存の内容を読み込み（未知フィールドを保持するため）
-        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-
-        # 更新
+        config_path, raw = self._read_config(agent_id)
         raw["name"] = name
         raw["model"] = model
         raw["description"] = description
-
-        # 書き戻し
-        config_path.write_text(yaml.dump(raw, allow_unicode=True), encoding="utf-8")
-
-        return self._load_agent_config(raw)
+        return self._write_config(config_path, raw)
 
     def update_trigger_config(self, agent_id: str, cron: str, enabled: bool) -> AgentConfig:
-        """trigger設定を更新する。未知フィールドを保持してマージする。更新後の AgentConfig を返す"""
+        """trigger設定を更新する。未知フィールドを保持してマージする"""
         if not cron:
             raise ValueError("cron式は必須です")
 
-        agent_dir = self._ensure_agent_dir(agent_id)
-        config_path = agent_dir / "config.yaml"
-
-        # 既存の内容を読み込み（未知フィールドを保持するため）
-        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-
-        # trigger設定を更新
+        config_path, raw = self._read_config(agent_id)
         raw["trigger"] = {"cron": cron, "enabled": enabled}
-
-        # 書き戻し
-        config_path.write_text(yaml.dump(raw, allow_unicode=True), encoding="utf-8")
-
-        # 更新後の設定を返す
-        return self._load_agent_config(raw)
+        return self._write_config(config_path, raw)
 
     def remove_trigger_config(self, agent_id: str) -> AgentConfig:
-        """trigger設定を削除する。更新後の AgentConfig を返す"""
-        agent_dir = self._ensure_agent_dir(agent_id)
-        config_path = agent_dir / "config.yaml"
-
-        # 既存の内容を読み込み
-        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-
-        # trigger設定を削除
-        if "trigger" in raw:
-            del raw["trigger"]
-
-        # 書き戻し
-        config_path.write_text(yaml.dump(raw, allow_unicode=True), encoding="utf-8")
-
-        # 更新後の設定を返す
-        return self._load_agent_config(raw)
-
-    def _load_agent_config(self, raw: dict) -> AgentConfig:
-        """yaml辞書からAgentConfigを作成する"""
-        return AgentConfig(**raw)
+        """trigger設定を削除する"""
+        config_path, raw = self._read_config(agent_id)
+        raw.pop("trigger", None)
+        return self._write_config(config_path, raw)
 
     def save_settings(self, agent_id: str, name: str, model: str, description: str,
                       system_prompt: str, trigger_cron: str | None, trigger_enabled: bool) -> AgentConfig:
@@ -124,24 +99,21 @@ class ConfigManager:
         if not model:
             raise ValueError("モデルは必須です")
 
-        agent_dir = self._ensure_agent_dir(agent_id)
-        config_path = agent_dir / "config.yaml"
-
-        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        config_path, raw = self._read_config(agent_id)
         raw["name"] = name
         raw["model"] = model
         raw["description"] = description
 
-        # trigger: 有効かつcronがあれば設定、それ以外は削除
         if trigger_enabled and trigger_cron:
             raw["trigger"] = {"cron": trigger_cron, "enabled": True}
         else:
             raw.pop("trigger", None)
 
-        config_path.write_text(yaml.dump(raw, allow_unicode=True), encoding="utf-8")
+        result = self._write_config(config_path, raw)
+        agent_dir = config_path.parent
         (agent_dir / "CLAUDE.md").write_text(system_prompt, encoding="utf-8")
 
-        return self._load_agent_config(raw)
+        return result
 
     def update_system_prompt(self, agent_id: str, content: str) -> None:
         """CLAUDE.md を更新する。存在しなければ新規作成する"""
