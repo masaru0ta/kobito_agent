@@ -11,6 +11,7 @@
   const btnNewConvEl = document.getElementById("btn-new-conversation");
   const logsListEl = document.getElementById("logs-list");
   const outputsListEl = document.getElementById("outputs-list");
+  const tasksListEl = document.getElementById("tasks-list");
   const missionContentEl = document.getElementById("mission-content");
   const taskContentEl = document.getElementById("task-content");
 
@@ -182,6 +183,7 @@
     loadLogs();
     loadMissionTask(agent);
     loadOutputs();
+    loadTasks();
     Settings.load(agent);
 
     // このエージェントにストリーミング中のpendingがあれば最初の1つを復元
@@ -664,6 +666,80 @@
     container.appendChild(preview);
 
     showRightPane("right-output-detail");
+  }
+
+  // ==============================
+  // タスクタブ
+  // ==============================
+
+  async function loadTasks() {
+    if (!currentAgentId) return;
+    const tasks = await API.getTasks(currentAgentId);
+    tasksListEl.innerHTML = "";
+
+    if (tasks.length === 0) {
+      tasksListEl.innerHTML = '<li class="empty-state">タスクはありません</li>';
+      return;
+    }
+
+    for (const task of tasks) {
+      const li = document.createElement("li");
+      li.className = "mid-list-item task-item";
+
+      // 1行目: タイトル + ステータス
+      const titleRow = document.createElement("div");
+      titleRow.className = "task-title-row";
+
+      const title = document.createElement("span");
+      title.className = "task-title";
+      title.textContent = task.title;
+
+      const statusBadge = document.createElement("span");
+      statusBadge.className = "task-status-badge task-status-" + (task.status === "未承認" ? "pending" : task.status === "承認済" ? "approved" : "done");
+      statusBadge.textContent = task.status;
+
+      // 2行目: プログレスバー + 進捗率
+      const progressRow = document.createElement("div");
+      progressRow.className = "task-progress-row";
+
+      const progressBar = document.createElement("div");
+      progressBar.className = "task-progress-bar";
+      const progressFill = document.createElement("div");
+      progressFill.className = "task-progress-fill";
+      if (task.progress >= 100) progressFill.classList.add("task-progress-done");
+      progressFill.style.width = task.progress + "%";
+      progressBar.appendChild(progressFill);
+
+      const progressText = document.createElement("span");
+      progressText.className = "task-progress-text";
+      progressText.textContent = task.progress + "% (" + task.completed_tasks + "/" + task.total_tasks + ")";
+
+      progressRow.appendChild(progressBar);
+      progressRow.appendChild(progressText);
+
+      titleRow.appendChild(title);
+      titleRow.appendChild(statusBadge);
+      li.appendChild(titleRow);
+      li.appendChild(progressRow);
+      li.addEventListener("click", () => showTaskDetail(task.filename, li));
+      tasksListEl.appendChild(li);
+    }
+  }
+
+  async function showTaskDetail(filename, listItem) {
+    tasksListEl.querySelectorAll(".mid-list-item").forEach((el) => el.classList.remove("active"));
+    if (listItem) listItem.classList.add("active");
+
+    const data = await API.getTaskContent(currentAgentId, filename);
+    const container = document.getElementById("right-task-detail");
+    container.innerHTML = "";
+
+    const preview = document.createElement("div");
+    preview.className = "right-preview";
+    preview.innerHTML = marked.parse(data.content);
+    container.appendChild(preview);
+
+    showRightPane("right-task-detail");
   }
 
   // ==============================

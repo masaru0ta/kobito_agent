@@ -21,6 +21,7 @@
   <div class="mid-tabs" id="mid-tabs">
     <button class="mid-tab active" data-view="chat">チャット</button>
     <button class="mid-tab" data-view="think">思考</button>
+    <button class="mid-tab" data-view="tasks">タスク</button>
     <button class="mid-tab" data-view="mission">ミッション</button>
     <button class="mid-tab" data-view="outputs">成果物</button>
     <button class="mid-tab" data-view="settings">設定</button>
@@ -76,6 +77,11 @@
         <button class="btn-save" id="btn-save-mission">保存</button>
       </div>
     </div>
+  </div>
+
+  <!-- タスク：一覧 -->
+  <div class="mid-content" id="mid-tasks">
+    <ul class="mid-list" id="tasks-list"></ul>
   </div>
 
   <!-- 成果物：ファイル一覧 -->
@@ -182,6 +188,9 @@
       </div>
     </div>
   </div>
+
+  <!-- タスク詳細 -->
+  <div class="right-content" id="right-task-detail"></div>
 
   <!-- 成果物プレビュー -->
   <div class="right-content" id="right-output-detail"></div>

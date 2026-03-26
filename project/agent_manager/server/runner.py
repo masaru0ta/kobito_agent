@@ -381,9 +381,31 @@ class Runner:
     async def think_stream(
         self, agent_info: AgentInfo, agent_dir: Path,
         session_id: str | None = None,
+        task_file: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         """自律思考をストリーミング実行。進捗イベントをyieldする"""
-        if session_id:
+        if session_id and task_file:
+            prompt = (
+                "前回の続きを1ステップだけ進めろ。\n"
+                f"完了したらチェックリストを更新すること（tasks/{task_file} を編集）。"
+            )
+        elif task_file:
+            task_path = agent_dir / "tasks" / task_file
+            task_content = task_path.read_text(encoding="utf-8")
+            prompt = (
+                "あなたは今から指定されたタスクを1ステップだけ進める。\n\n"
+                "## 対象タスク\n"
+                f"{task_content}\n\n"
+                "## 手順\n"
+                "1. タスクのチェックリストを確認する\n"
+                "2. 未完了の項目から1つ選んで実行する\n"
+                f"3. 完了したらチェックリストを更新する（tasks/{task_file} を編集）\n"
+                "4. 必要に応じて成果物を output/ に保存する\n\n"
+                "## ルール\n"
+                "- 大きな項目は小さなステップに分解し、1ステップだけ進めること\n"
+                "- チェックリストの更新を忘れないこと\n"
+            )
+        elif session_id:
             prompt = (
                 "前回の続きを1ステップだけ進めろ。\n"
                 "タスクが進捗したら task.md を更新すること。"

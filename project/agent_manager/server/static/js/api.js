@@ -167,6 +167,16 @@ const API = {
     return resp.json();
   },
 
+  async getTasks(agentId) {
+    const resp = await fetch(`/api/agents/${agentId}/tasks`);
+    return resp.json();
+  },
+
+  async getTaskContent(agentId, filename) {
+    const resp = await fetch(`/api/agents/${agentId}/tasks/${filename}`);
+    return resp.json();
+  },
+
   async getTriggers() {
     const resp = await fetch("/api/triggers");
     return resp.json();

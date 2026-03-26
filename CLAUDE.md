@@ -66,7 +66,7 @@ kobito_agent/
 | 2 | 設定管理 | Web UIからconfig.yaml・CLAUDE.mdを編集できる | config, web | 完了 |
 | 3 | 自律作業 | mission/taskを読み、自律的に作業を実行し、成果物を出力する | runner, web | 完了 |
 | 4 | 定期トリガー | 定期トリガーで自律思考サイクルを回す | trigger(cron) | 完了 |
-| 5 | エージェント間通信 | エージェント同士がトリガーで会話する | trigger | 未着手 |
+| 5 | エージェント間通信 | エージェント同士がトリガーで会話する | trigger | 完了 |
 | 6 | 記憶 | Mem0による記憶の保存・想起 | memory | 未着手 |
 
 ## エージェント

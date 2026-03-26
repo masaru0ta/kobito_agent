@@ -678,6 +678,59 @@ body {
 }
 .right-preview pre code { background: none; padding: 0; }
 
+/* --- タスク一覧 --- */
+.task-item { padding: 10px 16px; }
+.task-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.task-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #b0b8cd;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.task-status-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.task-status-pending { background: #3a2a1a; color: #fbbf24; }
+.task-status-approved { background: var(--think-bg); color: var(--think-accent); }
+.task-status-done { background: #1a2a3a; color: var(--accent); }
+.task-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.task-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: #1a1a25;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.task-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+  background: var(--accent);
+}
+.task-progress-done { background: var(--think-accent); }
+.task-progress-text {
+  font-size: 11px;
+  color: var(--muted);
+  flex-shrink: 0;
+  min-width: 70px;
+}
+
 /* --- トリガー設定 --- */
 .mid-form-label input[type="checkbox"] {
   margin-right: 6px;

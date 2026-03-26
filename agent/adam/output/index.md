@@ -2,6 +2,9 @@
 
 | 作成日 | 資料タイトル |
 |--------|-------------|
+| 2026-03-27 | [現在状況分析と次期フォーカス確認](autonomous_thinking_20260327_current_status_analysis.md) |
+| 2026-03-27 | [タスク状況検証と完了確認](autonomous_thinking_20260327_task_status_verification.md) |
+| 2026-03-27 | [team.md メンテナンス手順書](team_maintenance_guide.md) |
 | 2026-03-26 | [新しいエージェント追加手順書](agent_creation_guide.md) |
 | 2026-03-25 | [Web UIエージェント間チャット Step2実装完了](webui_inter_agent_chat_step2_implementation.md) |
 | 2026-03-25 | [Web UIエージェント間チャット機能実装計画](webui_inter_agent_chat_implementation_plan.md) |
