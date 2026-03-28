@@ -47,7 +47,7 @@ def _check_task_approval(task_path) -> str:
 
 
 @router.post("/think")
-async def post_think(agent_id: str, request: Request, resume: bool = False,
+async def post_think(agent_id: str, request: Request,
                      task: Optional[str] = None,
                      agent: AgentInfo = Depends(get_agent_or_404)):
     agents_dir = _get_agents_dir(request)
@@ -66,12 +66,12 @@ async def post_think(agent_id: str, request: Request, resume: bool = False,
         _check_task_approval(task_path)
         task_file = task
 
-        # タスク単位のセッション管理
+        # タスク単位のセッション管理（あれば自動継続）
         session_file = agent_dir / f".session_{task}"
         if session_file.exists():
             session_id = session_file.read_text(encoding="utf-8").strip()
-    elif resume:
-        # 従来モード（タスク未指定 + resume）
+    else:
+        # タスク未指定モード（セッションがあれば自動継続）
         session_file = agent_dir / ".think_session_id"
         if session_file.exists():
             session_id = session_file.read_text(encoding="utf-8").strip()

@@ -119,6 +119,17 @@ const API = {
     return resp.json();
   },
 
+  async approveTask(agentId, filename) {
+    const resp = await fetch(`/api/agents/${agentId}/tasks/${filename}/approve`, {
+      method: "POST",
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || "承認に失敗しました");
+    }
+    return resp.json();
+  },
+
   async getThinkPrompt(agentId) {
     const resp = await fetch(`/api/agents/${agentId}/think-prompt`);
     return resp.json();
@@ -137,8 +148,11 @@ const API = {
     return resp.json();
   },
 
-  async think(agentId, callbacks, { resume = false } = {}) {
-    const url = `/api/agents/${agentId}/think` + (resume ? "?resume=true" : "");
+  async think(agentId, callbacks, { task = null } = {}) {
+    const params = new URLSearchParams();
+    if (task) params.set("task", task);
+    const qs = params.toString();
+    const url = `/api/agents/${agentId}/think` + (qs ? "?" + qs : "");
     const resp = await fetch(url, { method: "POST" });
     if (!resp.ok) {
       const err = await resp.json();

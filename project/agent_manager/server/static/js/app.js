@@ -31,6 +31,46 @@
     return activePendingId ? pendingChats.get(activePendingId) : null;
   }
 
+  // --- モバイル対応 ---
+  const paneLeft = document.querySelector(".pane-left");
+  const paneMid = document.querySelector(".pane-mid");
+  const paneRight = document.querySelector(".pane-right");
+
+  function isMobile() {
+    return window.matchMedia("(max-width: 768px)").matches;
+  }
+
+  function mobileShowMid() {
+    if (!isMobile()) return;
+    paneLeft.classList.add("mobile-hidden");
+    paneMid.classList.add("mobile-visible");
+    paneRight.classList.remove("mobile-visible");
+  }
+
+  function mobileShowRight() {
+    if (!isMobile()) return;
+    paneLeft.classList.add("mobile-hidden");
+    paneMid.classList.remove("mobile-visible");
+    paneRight.classList.add("mobile-visible");
+  }
+
+  function mobileBackToLeft() {
+    if (!isMobile()) return;
+    paneLeft.classList.remove("mobile-hidden");
+    paneMid.classList.remove("mobile-visible");
+    paneRight.classList.remove("mobile-visible");
+  }
+
+  function mobileBackToMid() {
+    if (!isMobile()) return;
+    paneLeft.classList.add("mobile-hidden");
+    paneMid.classList.add("mobile-visible");
+    paneRight.classList.remove("mobile-visible");
+  }
+
+  document.getElementById("mobile-back-mid").addEventListener("click", mobileBackToLeft);
+  document.getElementById("mobile-back-right").addEventListener("click", mobileBackToMid);
+
   // --- 初期化 ---
   Chat.init(chatMessagesEl);
   Settings.init();
@@ -174,6 +214,9 @@
     agentListEl.querySelectorAll(".agent-item").forEach((el) => {
       el.classList.toggle("active", el.dataset.agentId === agentId);
     });
+
+    // モバイル: 中ペインへ遷移
+    mobileShowMid();
 
     const agent = agents.find((a) => a.agent_id === agentId);
     Chat.setAgentName(agent.config.name);
@@ -562,11 +605,32 @@
     taskContentEl.innerHTML = agent.task
       ? marked.parse(agent.task)
       : '<span class="text-muted">未設定</span>';
+    // ミッション概要テキスト（1行目を抽出）
+    const summaryText = document.getElementById("mission-summary-text");
+    if (agent.mission) {
+      const firstLine = agent.mission.split("\n").find(l => l.trim() && !l.trim().startsWith("#")) || "";
+      summaryText.textContent = firstLine.trim();
+    } else {
+      summaryText.textContent = "未設定";
+    }
     // 編集モードを閉じる
     document.getElementById("mission-view").style.display = "";
     document.getElementById("mission-edit").style.display = "none";
     document.getElementById("btn-edit-mission").textContent = "編集";
   }
+
+  // ミッション折りたたみ
+  document.getElementById("mission-summary-toggle").addEventListener("click", () => {
+    const detail = document.getElementById("mission-detail");
+    const arrow = document.getElementById("mission-arrow");
+    if (detail.style.display === "none") {
+      detail.style.display = "";
+      arrow.classList.add("open");
+    } else {
+      detail.style.display = "none";
+      arrow.classList.remove("open");
+    }
+  });
 
   // 編集モード切り替え
   document.getElementById("btn-edit-mission").addEventListener("click", () => {
@@ -717,29 +781,72 @@
       progressRow.appendChild(progressBar);
       progressRow.appendChild(progressText);
 
-      titleRow.appendChild(title);
       titleRow.appendChild(statusBadge);
+      titleRow.appendChild(title);
       li.appendChild(titleRow);
       li.appendChild(progressRow);
-      li.addEventListener("click", () => showTaskDetail(task.filename, li));
+
+      // 承認済タスクに作業ボタン
+      if (task.status === "承認済") {
+        const actionRow = document.createElement("div");
+        actionRow.className = "task-action-row";
+        const workBtn = document.createElement("button");
+        workBtn.className = "btn-task-work";
+        workBtn.textContent = "作業開始";
+        workBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          // 作業タブに切り替えてタスク指定で実行
+          document.querySelector('.mid-tab[data-view="think"]').click();
+          ThinkTab.startThinkForTask(task.filename);
+        });
+        actionRow.appendChild(workBtn);
+        li.appendChild(actionRow);
+      }
+
+      li.addEventListener("click", () => showTaskDetail(task.filename, li, task.status));
       tasksListEl.appendChild(li);
     }
   }
 
-  async function showTaskDetail(filename, listItem) {
-    tasksListEl.querySelectorAll(".mid-list-item").forEach((el) => el.classList.remove("active"));
-    if (listItem) listItem.classList.add("active");
+  async function showTaskDetail(filename, listItem, status) {
+    // 既に開いている詳細を閉じる
+    const existing = listItem.querySelector(".task-inline-detail");
+    if (existing) {
+      existing.remove();
+      listItem.classList.remove("active");
+      return;
+    }
+
+    // 他の開いている詳細を閉じる
+    tasksListEl.querySelectorAll(".task-inline-detail").forEach(el => el.remove());
+    tasksListEl.querySelectorAll(".mid-list-item").forEach(el => el.classList.remove("active"));
+    listItem.classList.add("active");
 
     const data = await API.getTaskContent(currentAgentId, filename);
-    const container = document.getElementById("right-task-detail");
-    container.innerHTML = "";
+    const detail = document.createElement("div");
+    detail.className = "task-inline-detail";
 
-    const preview = document.createElement("div");
-    preview.className = "right-preview";
-    preview.innerHTML = marked.parse(data.content);
-    container.appendChild(preview);
+    // 未承認なら承認ボタン
+    if (status === "未承認") {
+      const approveBtn = document.createElement("button");
+      approveBtn.className = "btn-task-approve";
+      approveBtn.textContent = "承認する";
+      approveBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        try {
+          await API.approveTask(currentAgentId, filename);
+          await loadTasks();
+        } catch (err) {
+          alert("承認に失敗しました: " + err.message);
+        }
+      });
+      detail.appendChild(approveBtn);
+    }
 
-    showRightPane("right-task-detail");
+    const content = document.createElement("div");
+    content.innerHTML = marked.parse(data.content);
+    detail.appendChild(content);
+    listItem.appendChild(detail);
   }
 
   // ==============================
@@ -768,6 +875,10 @@
       } else {
         el.style.display = "";
       }
+    }
+    // モバイル: 右ペインへ遷移（空状態以外）
+    if (id !== "right-empty") {
+      mobileShowRight();
     }
   }
 

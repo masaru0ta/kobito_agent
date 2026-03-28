@@ -10,7 +10,7 @@ const ThinkTab = (() => {
   let thinkState = null; // { events: [], finished: null, prompt: "" }
 
   // DOM要素（init で取得）
-  let btnThinkNewEl, btnThinkResumeEl;
+  let btnThinkRunEl;
 
   // ============================================================
   // 初期化
@@ -18,11 +18,9 @@ const ThinkTab = (() => {
 
   function init(deps) {
     _deps = deps;
-    btnThinkNewEl = document.getElementById("btn-think-new");
-    btnThinkResumeEl = document.getElementById("btn-think-resume");
+    btnThinkRunEl = document.getElementById("btn-think-run");
 
-    btnThinkNewEl.addEventListener("click", () => startThink(false));
-    btnThinkResumeEl.addEventListener("click", () => startThink(true));
+    btnThinkRunEl.addEventListener("click", () => startThink(false));
 
     // プロンプト表示
     document.getElementById("btn-think-prompt").addEventListener("click", async () => {
@@ -124,7 +122,7 @@ const ThinkTab = (() => {
       date.className = "mid-list-date";
       const badge = document.createElement("span");
       badge.className = "mid-list-badge " + (log.success ? "success" : "failure");
-      badge.textContent = log.success ? "成功" : "失敗";
+      badge.textContent = log.success ? "実行済" : "失敗";
       date.appendChild(badge);
       date.appendChild(document.createTextNode(" " + _deps.formatTime(log.timestamp)));
 
@@ -157,7 +155,7 @@ const ThinkTab = (() => {
     header.className = "right-detail-header";
     const badgeEl = document.createElement("span");
     badgeEl.className = "right-detail-badge " + (data.success ? "success" : "failure");
-    badgeEl.textContent = data.success ? "成功" : "失敗";
+    badgeEl.textContent = data.success ? "実行済" : "失敗";
     const timeEl = document.createElement("span");
     timeEl.className = "right-detail-time";
     timeEl.textContent = _deps.formatDateTime(data.timestamp);
@@ -233,7 +231,7 @@ const ThinkTab = (() => {
         : "thinking"
     );
     badge.textContent = thinkState.finished
-      ? (thinkState.finished.success ? "成功" : "失敗")
+      ? (thinkState.finished.success ? "実行済" : "失敗")
       : "思考中";
     header.appendChild(badge);
     detail.appendChild(header);
@@ -272,14 +270,11 @@ const ThinkTab = (() => {
   }
 
   function setThinkButtons(enabled) {
-    btnThinkNewEl.disabled = !enabled;
-    btnThinkResumeEl.disabled = !enabled;
+    btnThinkRunEl.disabled = !enabled;
     if (!enabled) {
-      btnThinkNewEl.textContent = "思考中...";
-      btnThinkResumeEl.textContent = "思考中...";
+      btnThinkRunEl.textContent = "作業中...";
     } else {
-      btnThinkNewEl.textContent = "新しく自律思考";
-      btnThinkResumeEl.textContent = "続きで自律思考";
+      btnThinkRunEl.textContent = "自律作業を１つ実行";
     }
   }
 
@@ -325,14 +320,15 @@ const ThinkTab = (() => {
     return li;
   }
 
-  async function startThink(resume) {
+  async function startThink(unused, taskFile = null) {
     const agentId = _deps.getAgentId();
     if (thinkState || !agentId) return;
 
     thinkState = { events: [], finished: null, prompt: "" };
     setThinkButtons(false);
     renderThinkView();
-    createThinkingItem(resume ? "続行中" : "思考中");
+    const badgeText = taskFile ? "タスク実行中" : "作業中";
+    createThinkingItem(badgeText);
 
     try {
       await API.think(agentId, {
@@ -359,7 +355,7 @@ const ThinkTab = (() => {
           const badge = document.getElementById("think-stream-badge");
           if (badge) {
             badge.className = "right-detail-badge " + (result.success ? "success" : "failure");
-            badge.textContent = result.success ? "成功" : "失敗";
+            badge.textContent = result.success ? "実行済" : "失敗";
           }
           if (result.content) {
             const logArea = document.getElementById("think-stream-active");
@@ -389,7 +385,7 @@ const ThinkTab = (() => {
             badge.textContent = "失敗";
           }
         },
-      }, { resume });
+      }, { task: taskFile });
     } catch (e) {
       alert("思考実行に失敗しました: " + e.message);
     }
@@ -411,6 +407,7 @@ const ThinkTab = (() => {
   return {
     init,
     loadLogs,
+    startThinkForTask(taskFile) { return startThink(false, taskFile); },
     get isThinking() { return thinkState !== null; },
   };
 })();

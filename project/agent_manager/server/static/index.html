@@ -18,12 +18,12 @@
 
 <!-- 中ペイン（タブ + リスト/内容） -->
 <div class="pane-mid">
+  <button class="mobile-back-btn" id="mobile-back-mid">&larr; エージェント一覧</button>
   <div class="mid-tabs" id="mid-tabs">
-    <button class="mid-tab active" data-view="chat">チャット</button>
-    <button class="mid-tab" data-view="think">思考</button>
+    <button class="mid-tab active" data-view="chat">会話</button>
+    <button class="mid-tab" data-view="think">作業</button>
     <button class="mid-tab" data-view="tasks">タスク</button>
-    <button class="mid-tab" data-view="mission">ミッション</button>
-    <button class="mid-tab" data-view="outputs">成果物</button>
+    <button class="mid-tab" data-view="outputs">レポート</button>
     <button class="mid-tab" data-view="settings">設定</button>
   </div>
 
@@ -38,49 +38,55 @@
   <!-- 思考：実行ボタン + プロンプトボタン + 履歴一覧 -->
   <div class="mid-content" id="mid-think">
     <div class="mid-list-header mid-think-header">
-      <button class="btn-think-action" id="btn-think-new">新しく自律思考</button>
-      <button class="btn-think-action btn-think-resume" id="btn-think-resume">続きで自律思考</button>
+      <button class="btn-think-action" id="btn-think-run">自律作業を１つ実行</button>
       <button class="btn-action btn-think-prompt" id="btn-think-prompt">プロンプト</button>
     </div>
     <ul class="mid-list" id="logs-list"></ul>
   </div>
 
-  <!-- ミッション：表示/編集 -->
-  <div class="mid-content" id="mid-mission">
-    <div class="mid-list-header mid-mission-header">
-      <button class="btn-action" id="btn-talk-mission">ミッションについて話す</button>
-      <button class="btn-action btn-edit-toggle" id="btn-edit-mission">編集</button>
-    </div>
-    <!-- 表示モード -->
-    <div class="mid-direct" id="mission-view">
-      <div class="mid-direct-section">
-        <div class="mid-direct-label">ミッション (mission.md)</div>
-        <div id="mission-content" class="mid-direct-body"></div>
-      </div>
-      <div class="mid-direct-section">
-        <div class="mid-direct-label">タスク (task.md)</div>
-        <div id="task-content" class="mid-direct-body"></div>
-      </div>
-    </div>
-    <!-- 編集モード -->
-    <div class="mid-direct" id="mission-edit" style="display:none;">
-      <div class="mid-direct-section">
-        <div class="mid-direct-label">ミッション (mission.md)</div>
-        <textarea class="mid-form-textarea" id="edit-mission" style="min-height:150px;"></textarea>
-      </div>
-      <div class="mid-direct-section">
-        <div class="mid-direct-label">タスク (task.md)</div>
-        <textarea class="mid-form-textarea" id="edit-task" style="min-height:150px;"></textarea>
-      </div>
-      <div class="mid-form-actions">
-        <button class="btn-reset" id="btn-cancel-mission">キャンセル</button>
-        <button class="btn-save" id="btn-save-mission">保存</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- タスク：一覧 -->
+  <!-- タスク：ミッション概要 + タスク一覧 -->
   <div class="mid-content" id="mid-tasks">
+    <!-- ミッション概要（折りたたみ） -->
+    <div class="mission-summary" id="mission-summary">
+      <div class="mission-summary-header" id="mission-summary-toggle">
+        <span class="mission-summary-arrow" id="mission-arrow">&#9654;</span>
+        <span class="mission-summary-title">ミッション</span>
+        <span class="mission-summary-text" id="mission-summary-text"></span>
+      </div>
+      <div class="mission-summary-detail" id="mission-detail" style="display:none;">
+        <div class="mission-detail-actions">
+          <button class="btn-action" id="btn-talk-mission">ミッションについて話す</button>
+          <button class="btn-action btn-edit-toggle" id="btn-edit-mission">編集</button>
+        </div>
+        <!-- 表示モード -->
+        <div id="mission-view">
+          <div class="mid-direct-section">
+            <div class="mid-direct-label">ミッション (mission.md)</div>
+            <div id="mission-content" class="mid-direct-body"></div>
+          </div>
+          <div class="mid-direct-section">
+            <div class="mid-direct-label">タスク (task.md)</div>
+            <div id="task-content" class="mid-direct-body"></div>
+          </div>
+        </div>
+        <!-- 編集モード -->
+        <div id="mission-edit" style="display:none;">
+          <div class="mid-direct-section">
+            <div class="mid-direct-label">ミッション (mission.md)</div>
+            <textarea class="mid-form-textarea" id="edit-mission" style="min-height:150px;"></textarea>
+          </div>
+          <div class="mid-direct-section">
+            <div class="mid-direct-label">タスク (task.md)</div>
+            <textarea class="mid-form-textarea" id="edit-task" style="min-height:150px;"></textarea>
+          </div>
+          <div class="mid-form-actions">
+            <button class="btn-reset" id="btn-cancel-mission">キャンセル</button>
+            <button class="btn-save" id="btn-save-mission">保存</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- タスク一覧 -->
     <ul class="mid-list" id="tasks-list"></ul>
   </div>
 
@@ -147,6 +153,7 @@
 
 <!-- 右ペイン（詳細） -->
 <div class="pane-right">
+  <button class="mobile-back-btn" id="mobile-back-right">&larr; 戻る</button>
   <!-- 空状態 -->
   <div class="right-empty" id="right-empty">選択してください</div>
 

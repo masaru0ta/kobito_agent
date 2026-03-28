@@ -600,14 +600,39 @@ class Runner:
     # ============================================================
 
     def _save_log(self, agent_dir: Path, log_data: dict) -> str:
-        """思考ログを保存し、ファイルパスを返す"""
+        """思考ログを保存し、ファイルパスを返す。同一session_idのログがあれば更新する"""
         log_dir = agent_dir / "log"
         log_dir.mkdir(exist_ok=True)
 
         now = datetime.now(timezone.utc)
-        filename = now.strftime("%Y%m%d_%H%M%S") + ".json"
         log_data["timestamp"] = now.isoformat()
 
+        # 同一session_idの既存ログを探す
+        session_id = log_data.get("session_id", "")
+        existing_path = None
+        if session_id:
+            for path in log_dir.glob("*.json"):
+                try:
+                    existing = json.loads(path.read_text(encoding="utf-8"))
+                    if existing.get("session_id") == session_id:
+                        existing_path = path
+                        break
+                except (json.JSONDecodeError, OSError):
+                    continue
+
+        if existing_path:
+            # 既存ログのイベントに追記
+            existing_data = json.loads(existing_path.read_text(encoding="utf-8"))
+            existing_data["events"] = existing_data.get("events", []) + log_data.get("events", [])
+            existing_data["response"] = log_data.get("response", existing_data.get("response", ""))
+            existing_data["prompt"] = log_data.get("prompt", existing_data.get("prompt", ""))
+            existing_data["success"] = log_data.get("success", existing_data.get("success"))
+            existing_data["error"] = log_data.get("error", existing_data.get("error"))
+            existing_data["timestamp"] = log_data["timestamp"]
+            existing_path.write_text(json.dumps(existing_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            return str(existing_path)
+
+        filename = now.strftime("%Y%m%d_%H%M%S") + ".json"
         log_path = log_dir / filename
         log_path.write_text(json.dumps(log_data, ensure_ascii=False, indent=2), encoding="utf-8")
         return str(log_path)

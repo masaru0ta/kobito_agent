@@ -188,3 +188,26 @@ def get_task_content(agent_id: str, filename: str, request: Request,
         "completed_tasks": completed,
         "total_tasks": total,
     }
+
+
+@router.post("/tasks/{filename}/approve")
+def approve_task(agent_id: str, filename: str, request: Request,
+                 agent: AgentInfo = Depends(get_agent_or_404)):
+    agents_dir = _get_agents_dir(request)
+    task_path = safe_path(agents_dir, agent_id, "tasks", filename)
+    if not task_path.exists():
+        raise HTTPException(status_code=404, detail="タスクが見つかりません")
+
+    content = task_path.read_text(encoding="utf-8")
+    import re
+    new_content = re.sub(
+        r'\*\*ステータス:\s*.+?\*\*',
+        '**ステータス: 承認済**',
+        content,
+        count=1,
+    )
+    if new_content == content:
+        raise HTTPException(status_code=400, detail="ステータス行が見つかりません")
+
+    task_path.write_text(new_content, encoding="utf-8")
+    return {"filename": filename, "status": "承認済"}
